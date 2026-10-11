@@ -57,10 +57,58 @@ target_link_libraries(cde PRIVATE PkgConfig::HYPRLAND)
 One `IHyprWindowDecoration` instance per window. Added from the `windowopen` event
 via `HyprlandAPI::addWindowDecoration`, torn down on close.
 
-`draw(PHLMONITOR, float const& alpha)` is invoked inside the compositor's render pass;
-the chrome texture is blitted there. Positioning is `DECORATION_POSITION_STICKY` on
-`DECORATION_EDGE_TOP` with `reserved = true`, so the title bar takes **real space** and
-the client shrinks beneath it, rather than the chrome floating over the client area.
+`draw(PHLMONITOR, float const& alpha)` is invoked once per frame per decoration.
+Positioning is `DECORATION_POSITION_STICKY` on `DECORATION_EDGE_TOP` with
+`reserved = true`, so the title bar takes **real space** and the client shrinks beneath
+it, rather than the chrome floating over the client area.
+
+## The three things that will waste your day
+
+All three cost hours to find. They are not obvious from the headers.
+
+**1. `draw()` cannot touch the framebuffer.** There is no GL context current inside it.
+Calling `g_pHyprOpenGL->renderTexture()` or `renderRect()` there compiles, runs, and
+draws *nothing at all* — no error, no log line. You must queue a pass element and let
+the compositor's element renderer issue the draw:
+
+```cpp
+CTexPassElement::SRenderData data;
+data.tex = tex; data.box = box; data.a = alpha;
+data.damage = CRegion(box); data.clipBox = box; data.clipRegion = CRegion(box);
+g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(data)));
+```
+
+`currentPass()` is public (`render/Renderer.hpp:139`). This is the whole reason hyprbars
+carries its own `BarPassElement`.
+
+**2. `assignedGeometry` is relative to the edge point, not the window.** For STICKY it
+must be translated by `g_pDecorationPositioner->getEdgeDefinedPoint(edges, window)`,
+then by the workspace `m_renderOffset` for non-pinned windows. Adding it to
+`window->logicalBox()` instead puts the bar far off-screen — `logicalBox()` already
+excludes decoration extents, so you double-subtract.
+
+**3. Rebuilding over the same path does not reload.** `hyprctl plugin unload` + `load`
+on a rebuilt `build/libcde.so` silently keeps running the **old** code — the compositor
+holds the previous, now-deleted inode, and `hyprctl plugin list` shows stale metadata
+from the old build. Build, then `cp build/libcde.so build/libcde-<new>.so` and load the
+*new* path. Check `ls -l /proc/$(pgrep -x Hyprland)/maps | grep cde` — it shows
+`(deleted)` when you have been fooled.
+
+Corollary: `printf` from a plugin goes nowhere when Hyprland was started by a greeter,
+because its stdout is a socket. To debug, append to a file under `$HOME`.
+
+## Reference implementation
+
+`hyprbars` — `/home/wyspr/Repos/hyprland-plugins/hyprbars` — is a working Hyprland
+titlebar plugin and the canonical example of an `IHyprWindowDecoration` in the wild.
+Consult it when the API notes below are not enough. It renders its title once into an
+`SP<Render::ITexture>` and blits it, the same approach our Cairo chrome should take.
+
+**Copy its structure, not its signatures.** hyprbars tracks Hyprland master, and its
+`draw()` takes `Render::CRenderContext&` and `Render::SWindowRenderPresentation&` —
+neither exists in our pinned 0.56.2, where the signature is `draw(PHLMONITOR, float const&)`
+(`render/decorations/IHyprWindowDecoration.hpp:41`). Its recent commits are literally
+"chase hyprland", so expect more drift.
 
 ## API notes
 
