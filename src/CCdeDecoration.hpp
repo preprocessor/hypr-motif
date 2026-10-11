@@ -35,7 +35,6 @@ class CCdeDecoration : public IHyprWindowDecoration {
     CBox         m_assigned = {0, 0, 0, 0};
 
     SP<Render::ITexture> m_barTex;
-    SP<Render::ITexture> m_titleTex;
 
     std::string m_lastTitle;
     float       m_lastScale = 0.f;

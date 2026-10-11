@@ -6,11 +6,12 @@
 namespace CDE {
 
     struct SConfig {
-        int        barHeight      = 22;
+        int        barHeight      = 25;
         CHyprColor face           = {0.600, 0.600, 0.600, 1};
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
         CHyprColor dark           = {0.306, 0.306, 0.306, 1};
         CHyprColor highlight      = {1.000, 1.000, 1.000, 1};
+        CHyprColor title          = {1.000, 1.000, 1.000, 1};
         bool       showButtons    = true;
         int        titleFontSize  = 11;
     };

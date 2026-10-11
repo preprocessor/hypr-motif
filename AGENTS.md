@@ -79,13 +79,10 @@ Renders today, confirmed by screenshot rather than by assumption:
 - Motif-grey title bar on the **measured** palette (`#999999` face, `#d1d1d1` light,
   `#4e4e4e` dark), not the earlier hand-picked greys.
 - Fielded layout: close button left, flexible title field, min/max right, each field
-  delimited by a 1px dark-over-light separator, plus a 3px white highlight on the
-  bottom edge.
-- Title centred **within the title field**, not across the bar — the fields are
-  asymmetric, so centring across the bar looks visibly off.
-- `plugin:cde:*` config values registered and honoured, including live reload via the
-  generation counter.
-- The bar reserves its configured height, so the client shrinks beneath it.
+  delimited by a 1px dark-over-light separator.
+- Title drawn **into the bar texture** with Cairo's toy text API, in `#ffffff`, centred
+  **within the title field**. A second pass element does not work — see gotcha 4.
+- The bar reserves its configured height (25px), so the client shrinks beneath it.
 
 Known gaps, in the order they bite:
 
@@ -103,14 +100,24 @@ Sampled from `example.png`. **The PNG is 2x-scaled, so image pixels ÷ 2 = logic
 Re-measure rather than eyeball; the greys differ by only a few counts and eyeballing
 gets them wrong.
 
-| Element | Hex | Current constant |
+| Element | Hex | Notes |
 |---|---|---|
-| Title bar face | `#999999` | `0.655` (too light) |
-| Bevel light | `#d1d1d1` | `0.855` (too light) |
-| Bevel dark | `#4e4e4e` | `0.325` (too light) |
-| Bottom highlight | `#ffffff` | not drawn |
+| Title bar face | `#999999` | |
+| Bevel light | `#d1d1d1` | |
+| Bevel dark | `#4e4e4e` | |
+| Title text | `#ffffff` | white on the face, **not** dark |
+| Window frame | `#76818f` | the grey edge above the bar; not ours |
 | Menu bar | `#5c90a4` | n/a — out of scope |
 | Client background | `#a59990` | n/a — not ours to draw |
+
+**There is no white highlight band.** An earlier revision of this file claimed one,
+measured from a column scan that happened to land on the title glyphs. The bar has no
+highlight strip; the only `#ffffff` in it is the title text.
+
+**Extract the grid with step 2 on BOTH axes.** The PNG is 2x-scaled, so one logical
+pixel is 2x2 image pixels. Sampling x at step 2 but y at step 1 produces a grid that is
+right in one direction and nonsense in the other, and yields plausible-looking but
+wrong measurements. Sample every 2nd row *and* every 2nd column.
 
 The title bar greys are genuinely **neutral** (R=G=B). The warm tone that reads as
 "authentic CDE" in the screenshot comes from the *client* background, which we do not
@@ -118,7 +125,8 @@ draw. Do not warm the chrome to match the impression.
 
 ## Title bar anatomy
 
-Measured across the Application Manager title bar (`example.png`, grey variant):
+Measured across the Application Manager title bar (`example.png`, grey variant).
+Window top-left is image (80, 312); logical px = image px ÷ 2.
 
 Horizontal fields, left to right:
 
@@ -132,19 +140,20 @@ one — in real Motif that is the window-menu button; we put close there to keep
 1-left/2-right shape while retaining all three buttons. To move close to the right, flip
 the ordering in `buttonRect` — it is one function.
 
-Vertical bevel order, top-down:
+Vertical bevel order, top-down, for a `BAR_HEIGHT` of **25**:
 
 ```
 2px  raised light   (outer bevel)
 2px  face
-1px  dark           ┐ separator
+1px  dark           ┐ groove
 1px  light          ┘
-7px  title field
-3px  white highlight (bottom edge)
+17px face           (fields, glyphs and title live here)
+1px  dark           (bottom edge)
 ```
 
 Separators are a 1px dark line over a 1px light line — that pairing is what makes the
-fields read as three panels rather than one bar.
+fields read as three panels rather than one bar. Buttons are a bare raised glyph box on
+the face; Motif does not draw a button *box* around the title-bar controls.
 
 ## Config options
 
@@ -153,12 +162,13 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 
 | Key | Type | Default |
 |---|---|---|
-| `bar_height` | int | `22` |
+| `bar_height` | int | `25` |
 | `color_face` | colour | `#999999` |
 | `color_light` | colour | `#d1d1d1` |
 | `color_dark` | colour | `#4e4e4e` |
 | `color_highlight` | colour | `#ffffff` |
 | `show_buttons` | bool | `true` |
+| `color_title` | colour | `#ffffff` |
 | `title_font_size` | int | `11` |
 
 Two constraints on implementing these:
@@ -171,9 +181,9 @@ Two constraints on implementing these:
   the item most likely to need a second pass.
 - `CColorValue::value()` returns a packed integer; `CHyprColor(uint64_t)` consumes it.
 
-## The three things that will waste your day
+## The four things that will waste your day
 
-All three cost hours to find. They are not obvious from the headers.
+All four cost hours to find. They are not obvious from the headers.
 
 **1. `draw()` cannot touch the framebuffer.** There is no GL context current inside it.
 Calling `g_pHyprOpenGL->renderTexture()` or `renderRect()` there compiles, runs, and
@@ -209,6 +219,12 @@ because its stdout is a socket. To debug, append to a file under `$HOME`.
 Corollary 2: setting a plugin config value with `hyprctl eval 'hl.config({...})'` does
 **not** reliably fire `config.reloaded`, so the bar can keep the old theme even though
 `hyprctl getoption` reports the new value. Follow it with `hyprctl reload`.
+
+**4. A second pass element inside an opaque one is silently dropped.** Queueing the bar
+and the title as two `CTexPassElement`s draws the bar and nothing else — no error, the
+title just never appears. The compositor culls an element whose region is already covered
+by an opaque one. Draw the title into the bar's Cairo surface instead; one texture, one
+pass element, and exact control over where the text lands.
 
 ## Reference implementation
 

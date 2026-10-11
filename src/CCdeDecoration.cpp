@@ -57,8 +57,7 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
 }
 
 void CCdeDecoration::retexture(float scale) {
-    m_barTex   = CDE::renderBar(m_assigned.size(), scale, m_hovered, m_pressed);
-    m_titleTex = CDE::renderTitle(m_window->m_title, scale, CDE::config().titleFontSize);
+    m_barTex = CDE::renderBar(m_assigned.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize);
 
     m_lastTitle    = m_window->m_title;
     m_lastScale    = scale;
@@ -168,13 +167,4 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     };
 
     queue(m_barTex, global);
-
-    if (m_titleTex) {
-        // Centre in the title field, not the whole bar — the button fields are not
-        // symmetric, so centring across the bar puts the title visibly right of centre.
-        // titleField is bar-relative, so the bar's global offset has to be added back.
-        const CBox      field = CDE::titleField(global.size());
-        const Vector2D ts    = m_titleTex->m_size;
-        queue(m_titleTex, {global.x + field.x + (field.w - ts.x) / 2, global.y + field.y + (field.h - ts.y) / 2, ts.x, ts.y});
-    }
 }
