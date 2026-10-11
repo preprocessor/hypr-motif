@@ -80,6 +80,46 @@ namespace {
         }
     }
 
+// The bottom corners are MITRED, not overlapping rectangles. Measured 5x5 from
+    // CDE-7.png; 'L'/'F'/'D' are the palette, rows run inner->outer (top to bottom).
+    // Row-major, index 0 is the outermost column.
+    constexpr const char* BL = "LLLFD"
+                               "LLFFF"
+                               "LLFFF"
+                               "LDDDD"
+                               "DDDDD";
+    constexpr const char* BR = "LFFDD"
+                               "FFFDD"
+                               "FFFDD"
+                               "DDDDD"
+                               "DDDDD";
+
+    void drawCorner(cairo_t* cr, double x, double y, const char* pat, const SPalette& p) {
+        for (int r = 0; r < CDE::BORDER; ++r)
+            for (int c = 0; c < CDE::BORDER; ++c) {
+                const char     ch = pat[r * CDE::BORDER + c];
+                const CHyprColor col = ch == 'L' ? p.light : ch == 'F' ? p.face : p.dark;
+                fill(cr, x + c, y + r, 1, 1, col);
+            }
+    }
+
+    // A separator marking off the corner grab square. The lit pixel goes on local x=0 in
+    // both directions — for the left strip that is the outer edge, for the right strip the
+    // inner one, which is what the reference does. On a dark-outer strip the outermost
+    // pixel of the second row keeps dark.
+    void grabSeparator(cairo_t* cr, double a, double b, double len, bool horizontal, bool darkOuter, const SPalette& p) {
+        if (horizontal) {
+            fill(cr, a, b, 1, len, p.light);
+            fill(cr, a + 1, b, CDE::BORDER - 1, len, p.dark);
+            fill(cr, a, b + len, CDE::BORDER, 1, p.light);
+            if (darkOuter)
+                fill(cr, a + CDE::BORDER - 1, b + len, 1, 1, p.dark);
+        } else {
+            fill(cr, a, b + 1, 1, CDE::BORDER - 2, p.dark);
+            fill(cr, a + 1, b + 1, 1, CDE::BORDER - 2, p.light);
+        }
+    }
+
 } // namespace
 
 namespace CDE {
@@ -243,6 +283,22 @@ SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale) {
             case DECORATION_EDGE_RIGHT: bevelBands(cr, 0, 0, size.y, true, true, p); break;
             case DECORATION_EDGE_BOTTOM: bevelBands(cr, 0, 0, size.x, false, true, p); break;
             default: break;
+        }
+
+        // Corner grab areas. The bottom strip is drawn last, so it owns both bottom
+        // corners and paints the mitre itself; the side strips own only their horizontal
+        // rule. The top corners need nothing — the bar's bottom edge and its own field
+        // separators already fall exactly on the 21px boundary.
+        if (edge == DECORATION_EDGE_BOTTOM) {
+            drawCorner(cr, 0, 0, BL, p);
+            drawCorner(cr, size.x - CDE::BORDER, 0, BR, p);
+
+            // Vertical rule, spanning the middle 3 rows of the strip.
+            grabSeparator(cr, CDE::CORNER_GRAB, 0, 0, false, true, p);
+            grabSeparator(cr, size.x - CDE::CORNER_GRAB - 2, 0, 0, false, true, p);
+        } else if (edge == DECORATION_EDGE_LEFT || edge == DECORATION_EDGE_RIGHT) {
+            // Horizontal rule: dark row then light row, 21px up from the bottom edge.
+            grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, edge == DECORATION_EDGE_RIGHT, p);
         }
 
         cairo_destroy(cr);

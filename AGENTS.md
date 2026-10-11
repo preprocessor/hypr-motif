@@ -89,6 +89,8 @@ arithmetically:
   continuous from the top.
 - The title bar spans the **full** window width, frame bands included. All four corners
   are seamless.
+- **Mitred corners**, not overlapping rectangles — see `## Corners`.
+- **Corner grab areas**: a 21px square at each corner delimited by separator lines.
 - Fielded layout: close button left, flexible title field, min/max right, each field
   delimited by a 1px dark-over-light separator. Five separators total: rel 4, 21, and
   `width-40`, `width-23`, `width-6`.
@@ -146,6 +148,70 @@ vertical centring bug and is not one. Compare bar-relative to bar-relative.
 The title bar greys are genuinely **neutral** (R=G=B). The warm tone that reads as
 "authentic CDE" in the screenshot comes from the *client* background, which we do not
 draw. Do not warm the chrome to match the impression.
+
+## Corners
+
+CDE mitres the corners — the two bevels wrap and step, they do not overlap. An earlier
+revision drew the side strips full-height and the bottom strip full-width and let them
+overlap, which is wrong in the 5x5px corner.
+
+Measured 5x5 from the bottom-left of the reference window (corner at x48, y641), rows
+inner to outer:
+
+```
+LLFFD      <- the bottom frame's light row; the outer two columns stay light
+LLFFF
+LLFFF
+LLDDD
+LDDDD
+```
+
+Bottom-right is the mirror and is **not** a mirror image — measure it, do not derive it:
+
+```
+LFFDD
+FFFDD
+FFFDD
+DDDDD
+DDDDD
+```
+
+Both are encoded as literal patterns (`BL`/`BR` in `chrome.cpp`). Only columns 0, 1 and
+4 deviate from the plain bands; 2 and 3 are unremarkable.
+
+**Ownership, which is what stops them fighting:** the bottom strip is drawn last, so it
+paints both bottom corners itself. The side strips only add their horizontal rule. The
+*top* corners need nothing at all — the bar's bottom edge and its own field separators
+already fall exactly on the 21px boundary, which is why the top corners looked right
+before any of this was implemented.
+
+### Corner grab areas
+
+A 21px square at each corner, marked off by a `dark(1) + light(1)` rule:
+
+| rule | position | spans |
+|---|---|---|
+| vertical, left | bar-rel 21 (dark), 22 (light) | bottom strip rows 1-3 only |
+| vertical, right | bar-rel `width-23` (dark), `width-23+1` (light) | bottom strip rows 1-3 only |
+| horizontal, bottom | 21px up from the bottom edge | full frame width |
+
+The vertical rule is **not** drawn on the strip's first and last rows — it appears only
+on the middle three, so it blends into the bands above and below.
+
+The horizontal rule's two rows are asymmetric between the sides, and that is deliberate:
+
+```
+left  frame:  LDDDD   then  LLLLL
+right frame:  LDDDD   then  LLLLD
+```
+
+The lit pixel sits at local x=0 on both, which is the *outer* edge on the left strip and
+the *inner* edge on the right. On a dark-outer strip the outermost pixel of the second row
+stays dark.
+
+`CORNER_GRAB` is a fixed 21, measured from one window. The only other window in CDE-7.png
+is cut off at the image edge, so there is nothing to confirm a formula against — do not
+"derive" it from `BORDER` without a second data point.
 
 ## Title bar anatomy
 

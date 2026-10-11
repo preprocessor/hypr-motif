@@ -35,6 +35,13 @@ namespace CDE {
     inline constexpr int BORDER      = 5;
     inline constexpr int FACE_BAND  = 2; // grey face between the two bevels
 
+    // CDE marks a 21px square resize grip at each corner, delimited by separator lines.
+    // Measured from CDE-7.png: the vertical rule sits at bar-rel 21 and width-23, the
+    // horizontal 21px up from the bottom edge. Fixed, not derived — the only other
+    // window in that screenshot is cut off at the image edge, so there is nothing to
+    // confirm a formula against.
+    inline constexpr int CORNER_GRAB = 21;
+
     enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
 
     // One texture holds the whole bar, title text included. Drawing the title into
