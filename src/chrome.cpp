@@ -80,9 +80,24 @@ namespace {
         }
     }
 
-// The bottom corners are MITRED, not overlapping rectangles. Measured 5x5 from
-    // CDE-7.png; 'L'/'F'/'D' are the palette, rows run inner->outer (top to bottom).
-    // Row-major, index 0 is the outermost column.
+// The corners are MITRED, not overlapping rectangles. Measured 5x5 from CDE-7.png
+    // (bottom pair) and examples/new-standard.png (top pair); 'L'/'F'/'D' are the palette,
+    // rows run inner->outer. Index 0 is the OUTERMOST column, so the top patterns read
+    // left-to-right from the window edge inward, and the bottom ones from inner outward.
+    //
+    // The top pair is why the bar's bevel appears to span the full window width: rows 0-1
+    // of TL/TR are light across, which is the bevel, and rows 2-3 drop the frame's inner
+    // band. Normal bands resume at row 5, below the mitre.
+    constexpr const char* TL = "LLLLL"
+                               "LLLLL"
+                               "LLFFF"
+                               "LLFFF"
+                               "LLFFD";
+    constexpr const char* TR = "LLLLL"
+                               "LLLLD"
+                               "FFFDD"
+                               "FFFDD"
+                               "DFFDD";
     constexpr const char* BL = "LLLFD"
                                "LLFFF"
                                "LLFFF"
@@ -285,20 +300,25 @@ SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale) {
             default: break;
         }
 
-        // Corner grab areas. The bottom strip is drawn last, so it owns both bottom
-        // corners and paints the mitre itself; the side strips own only their horizontal
-        // rule. The top corners need nothing — the bar's bottom edge and its own field
-        // separators already fall exactly on the 21px boundary.
-        if (edge == DECORATION_EDGE_BOTTOM) {
+        // Corners. Each strip owns the two corners it runs through: the side strips run
+        // the full window height so they take the top pair (and paint over the bar's top
+        // rows, which is what makes the bevel read as spanning the full width), while the
+        // bottom strip is drawn last and so takes the bottom pair. The top corner grab
+        // boundaries need no new rules — the bar's bottom edge and its own field
+        // separators already fall exactly on CORNER_GRAB.
+        if (edge == DECORATION_EDGE_LEFT) {
+            drawCorner(cr, 0, 0, TL, p);
+            grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, false, p);
+        } else if (edge == DECORATION_EDGE_RIGHT) {
+            drawCorner(cr, 0, 0, TR, p);
+            grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, true, p);
+        } else if (edge == DECORATION_EDGE_BOTTOM) {
             drawCorner(cr, 0, 0, BL, p);
             drawCorner(cr, size.x - CDE::BORDER, 0, BR, p);
 
             // Vertical rule, spanning the middle 3 rows of the strip.
             grabSeparator(cr, CDE::CORNER_GRAB, 0, 0, false, true, p);
             grabSeparator(cr, size.x - CDE::CORNER_GRAB - 2, 0, 0, false, true, p);
-        } else if (edge == DECORATION_EDGE_LEFT || edge == DECORATION_EDGE_RIGHT) {
-            // Horizontal rule: dark row then light row, 21px up from the bottom edge.
-            grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, edge == DECORATION_EDGE_RIGHT, p);
         }
 
         cairo_destroy(cr);

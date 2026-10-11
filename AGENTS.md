@@ -89,7 +89,9 @@ arithmetically:
   continuous from the top.
 - The title bar spans the **full** window width, frame bands included. All four corners
   are seamless.
-- **Mitred corners**, not overlapping rectangles — see `## Corners`.
+- **Mitred corners on all four edges**, not overlapping rectangles — see `## Corners`.
+  The bottom pair comes from CDE-7.png, the top pair from new-standard.png; both verified
+  pixel-for-pixel against a live render.
 - **Corner grab areas**: a 21px square at each corner delimited by separator lines.
 - Fielded layout: close button left, flexible title field, min/max right, each field
   delimited by a 1px dark-over-light separator. Five separators total: rel 4, 21, and
@@ -155,8 +157,15 @@ CDE mitres the corners — the two bevels wrap and step, they do not overlap. An
 revision drew the side strips full-height and the bottom strip full-width and let them
 overlap, which is wrong in the 5x5px corner.
 
-Measured 5x5 from the bottom-left of the reference window (corner at x48, y641), rows
-inner to outer:
+**Two references.** `examples/CDE-7.png` supplies the bottom pair and the 22px bar;
+`examples/new-standard.png` supplies the top pair. The latter is a *different* Motif
+dialect — tan palette (`#f7d9c0`/`#eda870`/`#7d593b`), a 25px bar and a menu bar. We take
+its **corner geometry only** and deliberately do not adopt the palette, the 25px bar or
+the menu bar (a non-goal below). Note it is **Adam7 interlaced** (`interlace=1`), which
+the ad-hoc PNG reader in this repo silently mangles into garbage — de-interlace before
+measuring.
+
+Measured 5x5, bottom-left corner at (x48, y641), rows inner to outer:
 
 ```
 LLFFD      <- the bottom frame's light row; the outer two columns stay light
@@ -176,14 +185,26 @@ DDDDD
 DDDDD
 ```
 
-Both are encoded as literal patterns (`BL`/`BR` in `chrome.cpp`). Only columns 0, 1 and
-4 deviate from the plain bands; 2 and 3 are unremarkable.
+Top pair from `new-standard.png` (corner at x0,y0 and x756,y0). Column 0 is the
+**outermost**:
+
+```
+TL            TR
+LLLLL         LLLLL
+LLLLL         LLLLD
+LLFFF         FFFDD
+LLFFF         FFFDD
+LLFFD         DFFDD
+```
+
+TL/TR rows 0-1 are light across, which is why the bar's bevel appears to span the full
+window width — it is the mitre, not the bar overdrawing the frame. Normal bands resume
+at row 5, below the mitre. All four are encoded as literal patterns in `chrome.cpp`.
 
 **Ownership, which is what stops them fighting:** the bottom strip is drawn last, so it
-paints both bottom corners itself. The side strips only add their horizontal rule. The
-*top* corners need nothing at all — the bar's bottom edge and its own field separators
-already fall exactly on the 21px boundary, which is why the top corners looked right
-before any of this was implemented.
+paints both bottom corners itself. The side strips run the full window height, so they
+paint the top pair — and because they draw after the bar, their mitre is what lands on
+screen in the bar's top rows. No reordering is needed.
 
 ### Corner grab areas
 
@@ -212,6 +233,11 @@ stays dark.
 `CORNER_GRAB` is a fixed 21, measured from one window. The only other window in CDE-7.png
 is cut off at the image edge, so there is nothing to confirm a formula against — do not
 "derive" it from `BORDER` without a second data point.
+
+`new-standard.png` **does** give the second data point, and it agrees on the relation if
+not the absolute value: its grab is 24 with a 25px bar, CDE-7's is 21 with a 22px bar.
+Both are `BAR_HEIGHT - 1`. We keep 21 because we keep the 22px bar; if the bar height
+changes, the grab follows it, and nothing else about the corner changes.
 
 ## Title bar anatomy
 
