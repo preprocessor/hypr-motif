@@ -26,12 +26,20 @@ namespace CDE {
     inline constexpr int FIELD_W     = 18; // width of a button field
     inline constexpr int RIGHT_MARGIN = 4; // window edge to the outermost separator
 
+    // Window frame on the left/right/bottom edges. Measured 4px: 2px light + 2px face
+    // on the top/left outer edge, face + 2px dark on bottom/right.
+    inline constexpr int BORDER      = 4;
+
     enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
 
     // One texture holds the whole bar, title text included. Drawing the title into
     // the same Cairo surface avoids queueing a second pass element, which the
     // compositor culls when the opaque bar already covers that area.
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize);
+
+    // The frame strip for a non-top edge. `edge` is an eDecorationEdges value; the
+    // strip's own width/height is whichever axis is the border thickness.
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale);
 
     // Logical-px rect of a button's glyph box within the bar, or {} for none/hidden.
     CBox buttonRect(Vector2D size, int btn, bool showButtons);

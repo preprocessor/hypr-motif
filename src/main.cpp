@@ -8,22 +8,41 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 
 #include "CCdeDecoration.hpp"
 #include "config.hpp"
 
-static HANDLE      PHANDLE   = nullptr;
-static const char* DECO_NAME = "CDE";
+static HANDLE PHANDLE = nullptr;
+
+// One decoration per edge. The top is the title bar; the other three are the frame.
+struct SEdge {
+    uint32_t    edge;
+    const char* name;
+};
+
+static constexpr SEdge EDGES[] = {
+    {DECORATION_EDGE_TOP, "CDE"},
+    {DECORATION_EDGE_LEFT, "CDE:left"},
+    {DECORATION_EDGE_RIGHT, "CDE:right"},
+    {DECORATION_EDGE_BOTTOM, "CDE:bottom"},
+};
 
 static void onNewWindow(PHLWINDOW window) {
     if (!window || !validMapped(window))
         return;
 
-    const bool already = std::ranges::any_of(window->m_windowDecorations, [](const auto& d) { return d && d->getDisplayName() == DECO_NAME; });
-    if (already)
-        return;
+    const auto has = [&](const char* name) {
+        return std::ranges::any_of(window->m_windowDecorations, [&](const auto& d) { return d && d->getDisplayName() == name; });
+    };
 
-    HyprlandAPI::addWindowDecoration(PHANDLE, window, Hyprutils::Memory::makeUnique<CCdeDecoration>(window));
+    for (const auto& e : EDGES) {
+        // Keyed on display name so re-running this stays idempotent.
+        if (has(e.name))
+            continue;
+
+        HyprlandAPI::addWindowDecoration(PHANDLE, window, Hyprutils::Memory::makeUnique<CCdeDecoration>(window, e.edge, e.name));
+    }
 }
 
 APICALL EXPORT std::string PLUGIN_API_VERSION() {

@@ -78,6 +78,9 @@ Renders today, confirmed by screenshot rather than by assumption:
 
 - Motif-grey title bar on the **measured** palette (`#999999` face, `#d1d1d1` light,
   `#4e4e4e` dark), not the earlier hand-picked greys.
+- A 4px raised frame on the left, right and bottom edges, as separate reserved
+  decorations: 2px light + 2px face on the outer left, face + 2px dark on the outer
+  right. The client genuinely shrinks inward — it is not an overlay.
 - Fielded layout: close button left, flexible title field, min/max right, each field
   delimited by a 1px dark-over-light separator.
 - Title drawn **into the bar texture** with Cairo's toy text API, in `#ffffff`, centred
@@ -90,8 +93,10 @@ Known gaps, in the order they bite:
   `onInputOnDeco`'s `pos` is assumed **decoration-local**. If it is actually global,
   nothing will ever register a hit. Check this first — `barDeco.cpp:211` subtracts
   `assignedBoxGlobal().pos()` from raw mouse coords, which hints the raw form is global.
-- **`bar_height` changes at runtime are untested.** It feeds `desiredExtents`, so it
-  only takes effect once the positioner re-runs.
+- **No resize handles on the frame edges.** The left/right/bottom decorations swallow no
+  input and do nothing; CDE has resize grips in the corners.
+- **`bar_height` / `border_size` changes at runtime are untested.** They feed
+  `desiredExtents`, so they only take effect once the positioner re-runs.
 - **The active border still double-draws** — see `## Known unknown`.
 
 ## Measured reference values
@@ -234,11 +239,24 @@ g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement
 `currentPass()` is public (`render/Renderer.hpp:139`). This is the whole reason hyprbars
 carries its own `BarPassElement`.
 
-**2. `assignedGeometry` is relative to the edge point, not the window.** For STICKY it
-must be translated by `g_pDecorationPositioner->getEdgeDefinedPoint(edges, window)`,
-then by the workspace `m_renderOffset` for non-pinned windows. Adding it to
-`window->logicalBox()` instead puts the bar far off-screen — `logicalBox()` already
-excludes decoration extents, so you double-subtract.
+**2. Every edge derives from `getBoxWithIncludedDecos`, not from `assignedGeometry`.**
+`assignedGeometry` is relative to the edge's defined point, and the positioner anchors
+each decoration to the *outer* window — so translating by the edge point, or adding
+`window->logicalBox()`, is wrong by the bar height. `logicalBox()` is worse still: it
+does not report the window box at all (it returned `(12,-1,1708,1464)` for a window
+Hyprland reported at `[31,52] 1670x1357`). Use one outer box and slice it per edge:
+
+```cpp
+const CBox outer = g_pDecorationPositioner->getBoxWithIncludedDecos(m_window.lock()); // needs a LOCKED ptr
+const double barH = CDE::config().barHeight;
+TOP:    {outer.x,                    outer.y,                 outer.w, barH}
+LEFT:   {outer.x,                    outer.y + barH,          BORDER,   outer.h - barH - BORDER}
+RIGHT:  {outer.x + outer.w - BORDER, outer.y + barH,          BORDER,   outer.h - barH - BORDER}
+BOTTOM: {outer.x,                    outer.y + outer.h - BORDER, outer.w, BORDER}
+```
+
+The bar must span the full `outer.w` or it is inset by the frame width on each side,
+leaving a wallpaper gap in both top corners.
 
 **3. Rebuilding over the same path does not reload.** `hyprctl plugin unload` + `load`
 on a rebuilt `build/libcde.so` silently keeps running the **old** code — the compositor
@@ -298,15 +316,61 @@ shipped headers — nixpkgs ships headers only, no `.cpp`. Expect to need
 `decoration:border_size = 0` in `hyprland.conf` to avoid a double frame. Confirm the
 behaviour empirically before trying to "fix" it in code.
 
+## Next increment (planned)
+
+Part 1 is now implemented — see `## Status`. Part 2 is not.
+
+**Part 1 — four reserved edges.** The left/right/bottom frame, not an overlay: each
+edge gets its own `IHyprWindowDecoration` with `reserved = true`, so the client shrinks
+inward and the frame is real. Do not switch to `DECORATION_POSITION_ABSOLUTE`; it is
+simpler but clips the client by the border width.
+
+`CCdeDecoration` is parameterised by edge rather than duplicated. Confirmed safe: four
+`DECORATION_CUSTOM` instances per window, because `getDecorationByType` is declared but
+never called internally and `DECORATION_CUSTOM` has no special-casing in the headers.
+
+- `renderBorder(edge, size, scale)` draws the 4px raised frame: 2px light + 2px face on
+  the top/left outer edge, face + 2px dark on bottom/right.
+- `desiredExtents` per edge. `SBoxExtents.topLeft` is `{left, top}` and `bottomRight`
+  is `{right, bottom}`: TOP `{0, barHeight}`, LEFT `{borderSize, 0}`,
+  RIGHT `bottomRight = {borderSize, 0}`, BOTTOM `bottomRight = {0, borderSize}`.
+- `draw()` must call `getEdgeDefinedPoint(m_edge, ...)`, not the hardcoded TOP.
+- Display names are `CDE` for the bar and `CDE:left/right/bottom` for the frame; the
+  dedupe check keys off them so `onNewWindow` stays idempotent.
+
+**Part 2 — rule-settable colours.** Register four effects in `pluginInit`, unregister in
+`PLUGIN_EXIT` (hyprbars' pattern):
+
+```cpp
+Desktop::Rule::windowEffects()->registerEffect("cde:face");  // + light, dark, title
+```
+
+`configFor(PHLWINDOW)` reads the global config then overrides any colour present in
+`window->m_ruleApplicator->m_otherProps.props`. Precedence: **rule wins over config**,
+one colour at a time, so a rule may set `cde:face` alone and inherit the rest.
+
+```lua
+windowrulev2 = float, title:^(kitty)$, cde:face rgb(ff00aa55)
+```
+
+Also needs `Event::bus()->m_events.window.updateRules` to invalidate that window, or a
+rule change will not redraw until something else does.
+
+**API drift to watch:** `Config::ParserUtils::parseColor` returns
+`std::expected<int64_t, std::string>` in 0.56.2, not `std::optional`. hyprbars' `.value_or(0)`
+will not compile against it — check `has_value()` instead.
+
 ## Roadmap
 
-The title bar fidelity increment is done. Remaining, in the order worth doing:
+The title bar fidelity increment and the frame are done. Remaining, in order:
 
-1. **Verify button clicks.** Never exercised — see the hit-testing note in `## Status`.
+1. **Rule-settable colours** (Part 2 above). Cheap and self-contained — do it next.
+2. **Verify button clicks.** Never exercised — see the hit-testing note in `## Status`.
    This is the single most valuable unknown left.
-2. Make `bar_height` changes take effect at runtime (needs `damageEntire()` on reload).
-3. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
-4. Optional: an active/inactive title colour pair, so the bar reflects focus the way
+3. Make `bar_height` / `border_size` changes take effect at runtime (needs
+   `damageEntire()` on reload).
+4. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
+5. Optional: an active/inactive title colour pair, so the bar reflects focus the way
    CDE's does.
 
 ## Non-goals
@@ -316,7 +380,4 @@ Deliberately out of scope — do not add these by accident:
 - App menu bars. Motif has a menubar, but populating it is app territory, not decoration.
 - The status bar strip at the bottom of the client area.
 - The bottom Motif dock / launcher. That is a separate compositor surface, not a decoration.
-- **The outer frame on the left/right/bottom window edges.** Only the top edge is
-  decorated. A full surround means three more decoration instances with their own edge
-  and reserved-space math, so it is its own increment — not an oversight.
 - Per-button config toggles. `show_buttons` covers what has actually been asked for.

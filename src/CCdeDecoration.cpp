@@ -7,19 +7,30 @@
 
 using namespace Hyprutils::Math;
 
-static const char* DISPLAY_NAME = "CDE";
-
-CCdeDecoration::CCdeDecoration(PHLWINDOW w)
+CCdeDecoration::CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name)
     : IHyprWindowDecoration(w)
-    , m_window(w) {}
+    , m_window(w)
+    , m_edge(edge)
+    , m_name(std::move(name)) {}
 
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
+    const auto& cfg = CDE::config();
+
     SDecorationPositioningInfo info;
-    info.policy         = DECORATION_POSITION_STICKY;
-    info.edges          = DECORATION_EDGE_TOP;
-    info.priority       = 10005; // outrank hyprland's own border decoration
-    info.reserved       = true;
-    info.desiredExtents = {{0, CDE::config().barHeight}, {0, 0}};
+    info.policy   = DECORATION_POSITION_STICKY;
+    info.edges    = m_edge;
+    info.priority = 10005; // outrank hyprland's own border decoration
+    info.reserved = true;
+
+    // SBoxExtents.topLeft is {left, top}; bottomRight is {right, bottom}.
+    switch (m_edge) {
+        case DECORATION_EDGE_TOP: info.desiredExtents = {{0, cfg.barHeight}, {0, 0}}; break;
+        case DECORATION_EDGE_LEFT: info.desiredExtents = {{CDE::BORDER, 0}, {0, 0}}; break;
+        case DECORATION_EDGE_RIGHT: info.desiredExtents = {{0, 0}, {CDE::BORDER, 0}}; break;
+        case DECORATION_EDGE_BOTTOM: info.desiredExtents = {{0, 0}, {0, CDE::BORDER}}; break;
+        default: info.desiredExtents = {{0, 0}, {0, 0}}; break;
+    }
+
     return info;
 }
 
@@ -49,7 +60,7 @@ uint64_t CCdeDecoration::getDecorationFlags() {
 }
 
 std::string CCdeDecoration::getDisplayName() {
-    return DISPLAY_NAME;
+    return m_name;
 }
 
 void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
@@ -57,11 +68,14 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
 }
 
 void CCdeDecoration::retexture(float scale) {
-    m_barTex = CDE::renderBar(m_assigned.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize);
+    if (isTop())
+        m_barTex = CDE::renderBar(m_assigned.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize);
+    else
+        m_barTex = CDE::renderBorder(m_edge, m_assigned.size(), scale);
 
-    m_lastTitle    = m_window->m_title;
-    m_lastScale    = scale;
-    m_generation   = CDE::generation();
+    m_lastTitle  = m_window->m_title;
+    m_lastScale  = scale;
+    m_generation = CDE::generation();
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
@@ -72,13 +86,17 @@ void CCdeDecoration::ensureTextures(float scale) {
 }
 
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any) {
-    const Vector2D size = m_assigned.size();
+    // Only the top edge has buttons; the frame edges are decorative for now.
+    if (!isTop())
+        return true;
+
+    const Vector2D size   = m_assigned.size();
     const bool     buttons = CDE::config().showButtons;
 
     auto buttonAt = [&](const Vector2D& p) -> int {
         for (int b = 0; b < CDE::BTN_COUNT; ++b) {
             const CBox r = CDE::buttonRect(size, b, buttons);
-            if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
+            if (r.w && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
                 return b;
         }
         return CDE::BTN_NONE;
@@ -113,7 +131,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         case INPUT_TYPE_DRAG_END: {
             const int hit  = buttonAt(pos);
             const int held = m_pressed;
-            m_pressed     = CDE::BTN_NONE;
+            m_pressed      = CDE::BTN_NONE;
             m_barTex.reset();
 
             if (held != CDE::BTN_NONE && held == hit) {
@@ -141,30 +159,42 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
 
     ensureTextures(scale);
 
-    // For STICKY, assignedGeometry is relative to the top edge's defined point — NOT the
-    // window origin. Scrolling layouts additionally shift by the workspace render offset.
-    CBox global = m_assigned;
-    global.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_TOP, m_window));
+    if (!m_barTex)
+        return;
+
+// Every edge derives from the window's outer box (decorations included) rather
+    // than from the assigned geometry: the positioner anchors each decoration to the
+    // outer window, so translating by the edge point double-offsets, and logicalBox()
+    // does not report the window box at all. The bar spans the full outer width so it
+    // sits over the frame rather than leaving a gap at the top corners.
+    const CBox outer = g_pDecorationPositioner->getBoxWithIncludedDecos(m_window.lock());
+    if (outer.w <= 0 || outer.h <= 0)
+        return;
+
+    const double barH = CDE::config().barHeight;
+
+    CBox global;
+    switch (m_edge) {
+        case DECORATION_EDGE_TOP: global = {outer.x, outer.y, outer.w, barH}; break;
+        case DECORATION_EDGE_LEFT: global = {outer.x, outer.y + barH, CDE::BORDER, outer.h - barH - CDE::BORDER}; break;
+        case DECORATION_EDGE_RIGHT: global = {outer.x + outer.w - CDE::BORDER, outer.y + barH, CDE::BORDER, outer.h - barH - CDE::BORDER}; break;
+        case DECORATION_EDGE_BOTTOM: global = {outer.x, outer.y + outer.h - CDE::BORDER, outer.w, CDE::BORDER}; break;
+        default: return;
+    }
+
     if (m_window->m_workspace && !m_window->m_pinned)
         global.translate(m_window->m_workspace->m_renderOffset->value());
 
     // Decorations cannot draw to the framebuffer directly: draw() runs outside the GL
     // pass. Queue a texture element and let the compositor's element renderer issue the
     // draw with a current context.
-    auto queue = [&](SP<Render::ITexture> tex, const CBox& box) {
-        if (!tex)
-            return;
+    CTexPassElement::SRenderData data;
+    data.tex        = m_barTex;
+    data.box        = global;
+    data.a          = alpha;
+    data.damage     = CRegion(global);
+    data.clipBox    = global;
+    data.clipRegion = CRegion(global);
 
-        CTexPassElement::SRenderData data;
-        data.tex        = tex;
-        data.box        = box;
-        data.a          = alpha;
-        data.damage     = CRegion(box);
-        data.clipBox    = box;
-        data.clipRegion = CRegion(box);
-
-        g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(data)));
-    };
-
-    queue(m_barTex, global);
+    g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(data)));
 }

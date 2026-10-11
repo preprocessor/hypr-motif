@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include <hyprland/src/helpers/Color.hpp>
+#include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
 #include "config.hpp"
@@ -172,6 +173,33 @@ namespace CDE {
             cairo_set_source_rgb(cr, p.title.r, p.title.g, p.title.b);
             cairo_move_to(cr, tx, ty);
             cairo_show_text(cr, title.c_str());
+        }
+
+        cairo_destroy(cr);
+
+        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
+        cairo_surface_destroy(surf);
+        return tex;
+    }
+
+SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale) {
+        const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
+        const SPalette p = currentPalette();
+
+        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+        cairo_t*         cr   = cairo_create(surf);
+        cairo_scale(cr, scale, scale);
+
+        fill(cr, 0, 0, size.x, size.y, p.face);
+
+        // Raised frame: the outer edge of the window gets the highlight (light on the
+        // left/bottom, dark on the right), the inner edge stays face.
+        const double t = BORDER / 2.0;
+        switch (edge) {
+            case DECORATION_EDGE_LEFT: fill(cr, 0, 0, t, size.y, p.light); break;
+            case DECORATION_EDGE_RIGHT: fill(cr, size.x - t, 0, t, size.y, p.dark); break;
+            case DECORATION_EDGE_BOTTOM: fill(cr, 0, size.y - t, size.x, t, p.dark); break;
+            default: break;
         }
 
         cairo_destroy(cr);
