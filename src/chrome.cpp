@@ -46,16 +46,6 @@ namespace {
         fill(cr, b.x + b.w - CDE::SIDE, b.y, CDE::SIDE, b.h, p.dark);
     }
 
-    void drawClose(cairo_t* cr, const CBox& b, const SPalette& p) {
-        cairo_set_line_width(cr, 1);
-        cairo_set_source_rgb(cr, p.dark.r, p.dark.g, p.dark.b);
-        cairo_move_to(cr, b.x + 3, b.y + 1);
-        cairo_line_to(cr, b.x + b.w - 3, b.y + b.h - 2);
-        cairo_move_to(cr, b.x + b.w - 3, b.y + 1);
-        cairo_line_to(cr, b.x + 3, b.y + b.h - 2);
-        cairo_stroke(cr);
-    }
-
 } // namespace
 
 namespace CDE {
@@ -77,15 +67,18 @@ namespace CDE {
     }
 
     // Motif's title-bar glyphs, measured from example.png at BAR_HEIGHT 25.
-    // All three share one centre line at y=17.5; only the sizes differ:
-    //   left (window menu)  12 x 4
-    //   minimize             4 x 4
-    //   maximize            12 x 12
+    // All three share one centre line — the centre of the field, which is the band
+    // between the groove and the bottom edge (rows 6..23). That is 3px below the
+    // bar's own centre, which is why centring on the bar looks visibly wrong.
+    //   left (window menu)  12 x 4   rows 13-16
+    //   minimize             4 x 4   rows 13-16
+    //   maximize            12 x 12  rows  9-20
     CBox buttonRect(Vector2D size, int btn, bool showButtons) {
         if (!showButtons || btn < 0 || btn >= BTN_COUNT)
             return {};
 
-        const double centre = size.y * 18.0 / 25.0;
+        const double fieldTop = BEVEL + 2 + GROOVE * 2;
+        const double centre   = (fieldTop + size.y - SIDE) / 2;
 
         double w = 4, h = 4;
         if (btn == BTN_MAX)
@@ -152,10 +145,7 @@ namespace CDE {
                     glyphFrame(cr, r, p);
                 }
 
-                switch (b) {
-                    case BTN_CLOSE: drawClose(cr, r, p); break;
-                    default: break; // Motif's min/max are bare raised rects, no icon
-                }
+                // All three are bare raised rects; Motif puts no icon in them.
             }
         }
 

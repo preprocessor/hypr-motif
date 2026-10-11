@@ -119,6 +119,11 @@ pixel is 2x2 image pixels. Sampling x at step 2 but y at step 1 produces a grid 
 right in one direction and nonsense in the other, and yields plausible-looking but
 wrong measurements. Sample every 2nd row *and* every 2nd column.
 
+**Anchor every row index to the bar, not the window.** The title bar starts at window
+row 3 — rows 0-2 are the window frame. Reporting a glyph as "row 16" when it means
+window row 16 puts it 3px lower than reality, which looks exactly like a vertical
+centring bug and is not one. Compare bar-relative to bar-relative, or subtract 3.
+
 The title bar greys are genuinely **neutral** (R=G=B). The warm tone that reads as
 "authentic CDE" in the screenshot comes from the *client* background, which we do not
 draw. Do not warm the chrome to match the impression.
@@ -160,13 +165,26 @@ and the outer right edge 4px in from the window edge. Measured from the right, t
 separators sit at 4, 24 and 44 logical px. Missing the third one is what makes a first
 attempt look visibly wrong on the right-hand end.
 
-Glyphs, all sharing one centre line at y=18 for a `BAR_HEIGHT` of 25:
+Glyphs, measured for a `BAR_HEIGHT` of 25. All three share one centre line, and it is
+**not** the centre of the bar — it is the centre of the *field*, the band between the
+groove and the bottom edge:
 
-| Glyph | Size | Notes |
-|---|---|---|
-| left (window menu) | 12x4 | we draw close here, as a 12x4 raised rect plus a small X |
-| minimize | 4x4 | bare raised rect, no icon — matches the source exactly |
-| maximize | 12x12 | bare raised rect, in the rightmost field |
+```
+bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 23 | 24
+          light  face  D  l  |------ field, centre 15 --------| dark
+                                      ^ all glyphs centre here
+```
+
+| Glyph | Size | Bar rows | Notes |
+|---|---|---|---|
+| left (window menu) | 12x4 | 13-16 | we draw close here — a bare raised rect, no X |
+| minimize | 4x4 | 13-16 | bare raised rect, no icon — matches the source exactly |
+| maximize | 12x12 | 9-20 | bare raised rect, in the rightmost field |
+
+Centring on the bar instead of the field puts every glyph ~3px low, which is very
+visible against the reference. Motif draws **no icon inside any of the three**; do not
+add one, and in particular do not draw an X — a 12x4 box has no room for one and it
+renders as a dark blob.
 
 Minimize is in the field left of maximize. Getting that order backwards is invisible in
 the code and obvious on screen.
