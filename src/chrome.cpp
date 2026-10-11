@@ -3,6 +3,7 @@
 #include <cairo/cairo.h>
 
 #include <algorithm>
+#include <cmath>
 
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
@@ -306,63 +307,86 @@ namespace CDE {
         return tex;
     }
 
-SP<Render::ITexture> renderShadow(Vector2D size, float scale, bool alongWindow, bool nearAtMax, CHyprColor color) {
+    static constexpr uint8_t BAYER8[8][8] = {
+        {  0, 32,  8, 40,  2, 34, 10, 42 },
+        { 48, 16, 56, 24, 50, 18, 58, 26 },
+        { 12, 44,  4, 36, 14, 46,  6, 38 },
+        { 60, 28, 52, 20, 62, 30, 54, 22 },
+        {  3, 35, 11, 43,  1, 33,  9, 41 },
+        { 51, 19, 59, 27, 49, 17, 57, 25 },
+        { 15, 47,  7, 39, 13, 45,  5, 37 },
+        { 63, 31, 55, 23, 61, 29, 53, 21 },
+    };
+
+    SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color) {
         const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
+        const double rScaled = shadowRange * scale;
+        if (rScaled <= 0)
+            return nullptr;
 
         cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-        cairo_t*         cr   = cairo_create(surf);
-        cairo_scale(cr, scale, scale);
+        uint32_t*        data = reinterpret_cast<uint32_t*>(cairo_image_surface_get_data(surf));
+        const int        stride = cairo_image_surface_get_stride(surf) / sizeof(uint32_t);
 
-        // Densest at the edge touching the window, fading to nothing at the outer limit.
-        // `alongWindow` says the fade runs along the strip's height (top/bottom margins)
-        // rather than its width (left/right). `nearAtMax` says which end of that axis is
-        // the one touching the window: the top and left margins have it at the maximum
-        // coordinate, the bottom and right at zero — they need opposite gradients.
-        const double span = alongWindow ? size.y : size.x;
-        const double near = nearAtMax ? span : 0.0;
-        const double far  = nearAtMax ? 0.0 : span;
+        const uint8_t a = sc<uint8_t>(std::clamp(color.a, 0.0, 1.0) * 255.0);
+        const uint8_t cr = sc<uint8_t>(std::clamp(color.r * color.a, 0.0, 1.0) * 255.0);
+        const uint8_t cg = sc<uint8_t>(std::clamp(color.g * color.a, 0.0, 1.0) * 255.0);
+        const uint8_t cb = sc<uint8_t>(std::clamp(color.b * color.a, 0.0, 1.0) * 255.0);
+        const uint32_t dot = (a << 24) | (cr << 16) | (cg << 8) | cb;
 
-        cairo_pattern_t* grad = alongWindow ? cairo_pattern_create_linear(0, far, 0, near) : cairo_pattern_create_linear(far, 0, near, 0);
-        cairo_pattern_add_color_stop_rgba(grad, 0.0, color.r, color.g, color.b, 0.0);
-        cairo_pattern_add_color_stop_rgba(grad, 1.0, color.r, color.g, color.b, color.a);
 
-        cairo_set_source(cr, grad);
-        cairo_rectangle(cr, 0, 0, size.x, size.y);
-        cairo_fill(cr);
-        cairo_pattern_destroy(grad);
+        const bool isBottom = edge == DECORATION_EDGE_BOTTOM;
+        // For bottom: width includes window plus corner. Window right edge is at w - rScaled.
+        const double winRightScaled = std::max(0.0, w - rScaled);
 
-        cairo_destroy(cr);
+        for (int y = 0; y < h; ++y) {
+            uint32_t* row = data + y * stride;
+            for (int x = 0; x < w; ++x) {
+                double d = 0.0;
+                if (isBottom) {
+                    if (x < rScaled) {
+                        // Bottom-left corner taper
+                        const double dx = rScaled - 1.0 - x;
+                        const double dy = y;
+                        d = std::hypot(dx, dy);
+                    } else if (x <= winRightScaled) {
+                        // Flat bottom strip
+                        d = y;
+                    } else {
+                        // Bottom-right corner round
+                        const double dx = x - winRightScaled;
+                        const double dy = y;
+                        d = std::hypot(dx, dy);
+                    }
+                } else {
+                    // Right edge: x is distance outward from window.
+                    if (y < rScaled) {
+                        // Top-right corner taper
+                        const double dx = x;
+                        const double dy = rScaled - 1.0 - y;
+                        d = std::hypot(dx, dy);
+                    } else {
+                        // Flat right strip
+                        d = x;
+                    }
+                }
 
+                if (d < rScaled) {
+                    const double density = 1.0 - (d / rScaled);
+                    const double threshold = (BAYER8[y % 8][x % 8] + 0.5) / 64.0;
+                    row[x] = (density > threshold) ? dot : 0;
+                } else {
+                    row[x] = 0;
+                }
+            }
+        }
+
+        cairo_surface_mark_dirty(surf);
         SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
         cairo_surface_destroy(surf);
         return tex;
     }
 
-    SP<Render::ITexture> renderShadowCorner(Vector2D size, float scale, bool nearAtMaxX, bool nearAtMaxY, CHyprColor color) {
-        const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
-
-        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-        cairo_t*         cr   = cairo_create(surf);
-        cairo_scale(cr, scale, scale);
-
-        const double cx = nearAtMaxX ? size.x : 0.0;
-        const double cy = nearAtMaxY ? size.y : 0.0;
-
-        cairo_pattern_t* grad = cairo_pattern_create_radial(cx, cy, 0.0, cx, cy, size.x);
-        cairo_pattern_add_color_stop_rgba(grad, 0.0, color.r, color.g, color.b, color.a);
-        cairo_pattern_add_color_stop_rgba(grad, 1.0, color.r, color.g, color.b, 0.0);
-
-        cairo_set_source(cr, grad);
-        cairo_rectangle(cr, 0, 0, size.x, size.y);
-        cairo_fill(cr);
-        cairo_pattern_destroy(grad);
-
-        cairo_destroy(cr);
-
-        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
-        cairo_surface_destroy(surf);
-        return tex;
-    }
 
     SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
         const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));

@@ -13,6 +13,11 @@ CCdeDecoration::CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name)
     , m_edge(edge)
     , m_name(std::move(name)) {}
 
+CCdeDecoration::~CCdeDecoration() {
+    if (m_lastShadowBox.w > 0 && m_lastShadowBox.h > 0)
+        g_pHyprRenderer->damageBox(m_lastShadowBox);
+}
+
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     const auto& cfg = CDE::config();
 
@@ -90,6 +95,8 @@ CBox CCdeDecoration::outerBox() const {
 
 void CCdeDecoration::damageEntire() {
     m_barTex.reset();
+    if (m_lastShadowBox.w > 0 && m_lastShadowBox.h > 0)
+        g_pHyprRenderer->damageBox(m_lastShadowBox);
 }
 
 eDecorationType CCdeDecoration::getDecorationType() {
@@ -112,43 +119,28 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
     HyprlandAPI::invokeHyprctlCommand("dispatch", args.empty() ? cmd : cmd + " " + args);
 }
 
-CBox CCdeDecoration::shadowStrip() const {
-        const auto cfg = CDE::config();
-        if (!cfg.shadowEnabled || cfg.shadowRange <= 0)
+CBox CCdeDecoration::shadowBox() const {
+    const auto cfg = CDE::config();
+    if (!cfg.shadowEnabled || cfg.shadowRange <= 0)
+        return {};
+
+    const CBox outer = outerBox();
+    if (!outer.w || !outer.h)
+        return {};
+
+    const double r = cfg.shadowRange;
+
+    switch (m_edge) {
+        case DECORATION_EDGE_RIGHT:
+            return {outer.x + outer.w, outer.y, r, outer.h};
+        case DECORATION_EDGE_BOTTOM:
+            return {outer.x, outer.y + outer.h, outer.w + r, r};
+        default:
             return {};
-
-        const CBox outer = outerBox();
-        if (!outer.w || !outer.h)
-            return {};
-
-        const double r = cfg.shadowRange;
-
-        switch (m_edge) {
-            case DECORATION_EDGE_TOP: return {outer.x, outer.y - r, outer.w, r};
-            case DECORATION_EDGE_LEFT: return {outer.x - r, outer.y, r, outer.h};
-            case DECORATION_EDGE_RIGHT: return {outer.x + outer.w, outer.y, r, outer.h};
-            case DECORATION_EDGE_BOTTOM: return {outer.x, outer.y + outer.h, outer.w, r};
-            default: return {};
-        }
     }
+}
 
-    CBox CCdeDecoration::shadowCorner(bool second) const {
-        const auto cfg = CDE::config();
-        if (!cfg.shadowEnabled || cfg.shadowRange <= 0 || (m_edge != DECORATION_EDGE_TOP && m_edge != DECORATION_EDGE_BOTTOM))
-            return {};
-
-        const CBox outer = outerBox();
-        if (!outer.w || !outer.h)
-            return {};
-
-        const double r = cfg.shadowRange;
-
-        const double x = second ? outer.x + outer.w : outer.x - r;
-        const double y = m_edge == DECORATION_EDGE_TOP ? outer.y - r : outer.y + outer.h;
-        return {x, y, r, r};
-    }
-
-    void CCdeDecoration::retexture(float scale) {
+void CCdeDecoration::retexture(float scale) {
     // Raster at exactly the box draw() will use, so the texture and the geometry cannot
     // drift apart.
     const CBox  box = outerBox();
@@ -165,20 +157,11 @@ CBox CCdeDecoration::shadowStrip() const {
     m_lastFocused = act ? 1 : 0;
     m_generation  = CDE::generation();
 
-    const CBox sh = shadowStrip();
-    if (sh.w && sh.h) {
-        const bool alongWindow = m_edge == DECORATION_EDGE_TOP || m_edge == DECORATION_EDGE_BOTTOM;
-        const bool nearAtMax   = m_edge == DECORATION_EDGE_TOP || m_edge == DECORATION_EDGE_LEFT;
-        m_shadowTex            = CDE::renderShadow(sh.size(), scale, alongWindow, nearAtMax, CDE::config().shadowColor);
-    } else
+    const CBox sh = shadowBox();
+    if (sh.w && sh.h)
+        m_shadowTex = CDE::renderDitherShadow(m_edge, sh.size(), scale, CDE::config().shadowRange, CDE::config().shadowColor);
+    else
         m_shadowTex = nullptr;
-
-    const CBox ca = shadowCorner(false);
-    const CBox cb = shadowCorner(true);
-    const auto  col = CDE::config().shadowColor;
-    const bool  topEdge = m_edge == DECORATION_EDGE_TOP;
-    m_shadowCornerA = ca.w && ca.h ? CDE::renderShadowCorner(ca.size(), scale, true, topEdge, col) : nullptr;
-    m_shadowCornerB = cb.w && cb.h ? CDE::renderShadowCorner(cb.size(), scale, false, topEdge, col) : nullptr;
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
@@ -279,30 +262,30 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     if (m_window->m_workspace && !m_window->m_pinned)
         global.translate(m_window->m_workspace->m_renderOffset->value());
 
-// Shadow first, so the frame paints over any overlap. This sits outside the window's
-    // own box, which is exactly why we draw it ourselves: Hyprland's shadow decoration
-    // cannot place it correctly once a plugin reserves space.
-    const auto queueShadow = [&](const CBox& sb, const SP<Render::ITexture>& tex) {
-        if (!tex || !sb.w || !sb.h)
-            return;
-
+    // Shadow first, so the frame paints over any overlap.
+    const CBox sb = shadowBox();
+    if (sb.w && sb.h && m_shadowTex) {
         CBox g = sb;
         if (m_window->m_workspace && !m_window->m_pinned)
             g.translate(m_window->m_workspace->m_renderOffset->value());
 
+        if (m_lastShadowBox.w && m_lastShadowBox.h && (m_lastShadowBox.x != g.x || m_lastShadowBox.y != g.y || m_lastShadowBox.w != g.w || m_lastShadowBox.h != g.h))
+            g_pHyprRenderer->damageBox(m_lastShadowBox);
+        m_lastShadowBox = g;
+
         CTexPassElement::SRenderData sd;
-        sd.tex        = tex;
+        sd.tex        = m_shadowTex;
         sd.box        = g;
         sd.a          = alpha;
         sd.damage     = CRegion(g);
         sd.clipBox    = g;
         sd.clipRegion = CRegion(g);
         g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(sd)));
-    };
+    } else if (m_lastShadowBox.w && m_lastShadowBox.h) {
+        g_pHyprRenderer->damageBox(m_lastShadowBox);
+        m_lastShadowBox = {};
+    }
 
-    queueShadow(shadowStrip(), m_shadowTex);
-    queueShadow(shadowCorner(false), m_shadowCornerA);
-    queueShadow(shadowCorner(true), m_shadowCornerB);
 
     // Decorations cannot draw to the framebuffer directly: draw() runs outside the GL
     // pass. Queue a texture element and let the compositor's element renderer issue the

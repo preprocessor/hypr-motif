@@ -17,7 +17,7 @@ class CCdeDecoration : public IHyprWindowDecoration {
   public:
     // `edge` is an eDecorationEdges value. Exactly one deco per edge per window.
     CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name);
-    ~CCdeDecoration() override = default;
+    ~CCdeDecoration() override;
 
     SDecorationPositioningInfo getPositioningInfo() override;
     void                       onPositioningReply(const SDecorationPositioningReply& reply) override;
@@ -42,15 +42,8 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // separators out of register with the buttons.
     CBox outerBox() const;
 
-    // The shadow strip this edge owns, sitting outside outerBox() but NOT spanning the
-    // corners — those get their own radial-falloff squares (shadowCorner). Empty when
-    // shadows are disabled. Positioned by draw(), not by the positioner, so it can sit
-    // outside the window.
-    CBox shadowStrip() const;
-
-    // The corner square(s) this edge owns: TOP takes the two upper corners, BOTTOM the
-    // two lower ones, LEFT/RIGHT none. `second` picks the right-hand one over the left.
-    CBox shadowCorner(bool second) const;
+    // Drop shadow box for this edge. Only RIGHT and BOTTOM cast shadows.
+    CBox shadowBox() const;
 
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
@@ -73,8 +66,8 @@ class CCdeDecoration : public IHyprWindowDecoration {
 
     SP<Render::ITexture> m_barTex;
     SP<Render::ITexture> m_shadowTex;
-    SP<Render::ITexture> m_shadowCornerA;
-    SP<Render::ITexture> m_shadowCornerB;
+    CBox                 m_lastShadowBox = {};
+
 
     std::string m_lastTitle;
     float       m_lastScale = 0.f;
