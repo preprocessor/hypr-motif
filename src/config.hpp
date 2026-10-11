@@ -27,6 +27,13 @@ namespace CDE {
 
         bool       showButtons    = true;
         int        titleFontSize  = 11;
+
+        // We draw our own shadow rather than using Hyprland's: CHyprDropShadowDecoration
+        // derives its box from the window geometry and gets it wrong when a plugin
+        // reserves space — the shadow came out ~46px below the frame instead of ~8.
+        bool       shadowEnabled  = true;
+        int        shadowRange    = 10;
+        CHyprColor shadowColor    = {0.000, 0.000, 0.000, 0.561}; // 0x8f black
     };
 
     // Registers every plugin:cde: value. Must be called from pluginInit.

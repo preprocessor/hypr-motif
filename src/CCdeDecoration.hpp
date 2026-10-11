@@ -5,6 +5,7 @@
 #include <string>
 
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
@@ -41,6 +42,16 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // separators out of register with the buttons.
     CBox outerBox() const;
 
+    // The shadow strip this edge owns, sitting outside outerBox() but NOT spanning the
+    // corners — those get their own radial-falloff squares (shadowCorner). Empty when
+    // shadows are disabled. Positioned by draw(), not by the positioner, so it can sit
+    // outside the window.
+    CBox shadowStrip() const;
+
+    // The corner square(s) this edge owns: TOP takes the two upper corners, BOTTOM the
+    // two lower ones, LEFT/RIGHT none. `second` picks the right-hand one over the left.
+    CBox shadowCorner(bool second) const;
+
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
     // focused window, not the one losing focus, so an event handler would have to track
@@ -61,6 +72,9 @@ class CCdeDecoration : public IHyprWindowDecoration {
     CBox         m_assigned = {0, 0, 0, 0};
 
     SP<Render::ITexture> m_barTex;
+    SP<Render::ITexture> m_shadowTex;
+    SP<Render::ITexture> m_shadowCornerA;
+    SP<Render::ITexture> m_shadowCornerB;
 
     std::string m_lastTitle;
     float       m_lastScale = 0.f;

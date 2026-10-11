@@ -12,7 +12,9 @@ namespace {
     SP<Config::Values::CIntValue>   barHeight, titleFontSize;
     SP<Config::Values::CColorValue> face, light, dark, highlight, title;
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
-    SP<Config::Values::CBoolValue>  showButtons;
+    SP<Config::Values::CColorValue> shadowColor;
+    SP<Config::Values::CBoolValue>  showButtons, shadowEnabled;
+    SP<Config::Values::CIntValue>   shadowRange;
 
     uint64_t g_generation = 0;
 
@@ -40,6 +42,9 @@ namespace CDE {
         titleActive  = makeShared<Config::Values::CColorValue>("plugin:cde:color_title_active", "Title text colour (active window)", HEX(0xff000000));
         showButtons = makeShared<Config::Values::CBoolValue>("plugin:cde:show_buttons", "Whether to draw the title bar buttons", true);
         titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", 11);
+        shadowEnabled = makeShared<Config::Values::CBoolValue>("plugin:cde:shadow_enabled", "Draw a drop shadow around the frame", true);
+        shadowRange   = makeShared<Config::Values::CIntValue>("plugin:cde:shadow_range", "Shadow blur range in pixels", 10);
+        shadowColor   = makeShared<Config::Values::CColorValue>("plugin:cde:shadow_color", "Shadow colour (alpha is respected)", HEX(0xff000000));
 
         HyprlandAPI::addConfigValueV2(h, barHeight);
         HyprlandAPI::addConfigValueV2(h, face);
@@ -53,6 +58,9 @@ namespace CDE {
         HyprlandAPI::addConfigValueV2(h, titleActive);
         HyprlandAPI::addConfigValueV2(h, showButtons);
         HyprlandAPI::addConfigValueV2(h, titleFontSize);
+        HyprlandAPI::addConfigValueV2(h, shadowEnabled);
+        HyprlandAPI::addConfigValueV2(h, shadowRange);
+        HyprlandAPI::addConfigValueV2(h, shadowColor);
     }
 
     SConfig config() {
@@ -82,6 +90,12 @@ namespace CDE {
             c.showButtons = showButtons->value();
         if (titleFontSize)
             c.titleFontSize = std::max(6, static_cast<int>(titleFontSize->value()));
+        if (shadowEnabled)
+            c.shadowEnabled = shadowEnabled->value();
+        if (shadowRange)
+            c.shadowRange = std::max(1, std::min(64, static_cast<int>(shadowRange->value())));
+        if (shadowColor)
+            c.shadowColor = CHyprColor(shadowColor->value());
 
         return c;
     }

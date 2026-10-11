@@ -344,6 +344,9 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 | `color_light_active` | colour | `#f7d9c0` |
 | `color_dark_active` | colour | `#7d593b` |
 | `color_title_active` | colour | `#000000` |
+| `shadow_enabled` | bool | `true` |
+| `shadow_range` | int | `10` |
+| `shadow_color` | colour | `#000000` |
 
 The un-suffixed colours apply to **unfocused** windows; the `_active` ones to the focused
 window. The active face/light/dark are measured from `examples/new-standard.png`.
@@ -573,3 +576,45 @@ yes/no question.
 
 `m_lastFocused` is an **int** initialised to `-1`, not a bool. A bool defaulting to false
 would read as a valid cache hit on the first frame of an unfocused window.
+
+## Shadow
+
+We draw our own shadow rather than using Hyprland's. **Leave `decoration:shadow:enabled`
+off** — with both on you get two shadows.
+
+`CHyprDropShadowDecoration` derives its box from the window geometry and gets it wrong
+once a plugin reserves space. Measured, with everything else identical:
+
+| below the window | shadow extent |
+|---|---|
+| plugin unloaded | 8px (correct) |
+| plugin loaded | **46px** |
+
+The top and left edges stayed correct at 7-8px, so it is specific to the bottom edge. It is
+**not** our decoration `priority` (measured unchanged at `priority = 0`) and **not**
+`bar_height`. The exact mechanism is unknown: `getPositioningInfo()` is declared in
+`CHyprDropShadowDecoration.hpp` with no body — nixpkgs ships headers only.
+
+Because we already know the outer box exactly, drawing it ourselves is correct by
+construction and cannot fight the positioner:
+
+- `shadowStrip()` returns the margin OUTSIDE `outerBox()` for the edge that owns it,
+  **excluding the corners**; `shadowCorner()` hands each corner square to the TOP or BOTTOM
+  edge. The pieces tile the ring without overlapping.
+- `draw()` queues the shadow elements *before* the frame, so the frame paints over any
+  overlap. The boxes are ours to choose — they are not the positioner's.
+- The strips fade along their thin axis only, densest against the window. `nearAtMax` picks
+  the direction: the top and left strips have the window at the maximum coordinate, the
+  bottom and right at zero, so they need **opposite** gradients. Getting that wrong renders
+  the shadow inverted — darkest at the outer edge.
+- A strip fades along one axis only, so a corner left to the strips is painted with a 1D
+  gradient and ends up asymmetric — full strength along one edge of the square, nearly
+  invisible along the other. `renderShadowCorner()` gives each corner square its own
+  **radial** falloff centred on the window's corner, with the fade radius equal to the
+  square's side so it meets both adjacent strips exactly. Verified against grim: the
+  falloff is symmetric along both edges of the square and continuous with the strips.
+
+Untested: whether the shadow smears when a window moves, since the shadow sits outside the
+window's damage region — stale pixels do linger after a drag (observed at a corner after
+moving a window). Nothing can be dispatched in this environment to move a window
+deliberately; the drag was incidental.

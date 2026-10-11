@@ -306,7 +306,65 @@ namespace CDE {
         return tex;
     }
 
-SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
+SP<Render::ITexture> renderShadow(Vector2D size, float scale, bool alongWindow, bool nearAtMax, CHyprColor color) {
+        const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
+
+        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+        cairo_t*         cr   = cairo_create(surf);
+        cairo_scale(cr, scale, scale);
+
+        // Densest at the edge touching the window, fading to nothing at the outer limit.
+        // `alongWindow` says the fade runs along the strip's height (top/bottom margins)
+        // rather than its width (left/right). `nearAtMax` says which end of that axis is
+        // the one touching the window: the top and left margins have it at the maximum
+        // coordinate, the bottom and right at zero — they need opposite gradients.
+        const double span = alongWindow ? size.y : size.x;
+        const double near = nearAtMax ? span : 0.0;
+        const double far  = nearAtMax ? 0.0 : span;
+
+        cairo_pattern_t* grad = alongWindow ? cairo_pattern_create_linear(0, far, 0, near) : cairo_pattern_create_linear(far, 0, near, 0);
+        cairo_pattern_add_color_stop_rgba(grad, 0.0, color.r, color.g, color.b, 0.0);
+        cairo_pattern_add_color_stop_rgba(grad, 1.0, color.r, color.g, color.b, color.a);
+
+        cairo_set_source(cr, grad);
+        cairo_rectangle(cr, 0, 0, size.x, size.y);
+        cairo_fill(cr);
+        cairo_pattern_destroy(grad);
+
+        cairo_destroy(cr);
+
+        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
+        cairo_surface_destroy(surf);
+        return tex;
+    }
+
+    SP<Render::ITexture> renderShadowCorner(Vector2D size, float scale, bool nearAtMaxX, bool nearAtMaxY, CHyprColor color) {
+        const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
+
+        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+        cairo_t*         cr   = cairo_create(surf);
+        cairo_scale(cr, scale, scale);
+
+        const double cx = nearAtMaxX ? size.x : 0.0;
+        const double cy = nearAtMaxY ? size.y : 0.0;
+
+        cairo_pattern_t* grad = cairo_pattern_create_radial(cx, cy, 0.0, cx, cy, size.x);
+        cairo_pattern_add_color_stop_rgba(grad, 0.0, color.r, color.g, color.b, color.a);
+        cairo_pattern_add_color_stop_rgba(grad, 1.0, color.r, color.g, color.b, 0.0);
+
+        cairo_set_source(cr, grad);
+        cairo_rectangle(cr, 0, 0, size.x, size.y);
+        cairo_fill(cr);
+        cairo_pattern_destroy(grad);
+
+        cairo_destroy(cr);
+
+        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
+        cairo_surface_destroy(surf);
+        return tex;
+    }
+
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
         const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
         const SPalette p = currentPalette(active);
 

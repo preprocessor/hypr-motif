@@ -54,6 +54,20 @@ namespace CDE {
     // strip's own width/height is whichever axis is the border thickness.
     SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active);
 
+    // One margin of the drop shadow, drawn OUTSIDE the frame. `alongWindow` is true for
+    // the top and bottom margins (the fade runs along the strip's height); `nearAtMax`
+    // says which end touches the window — the top/left margins are near=high, the
+    // bottom/right are near=low, so they need opposite gradients.
+    SP<Render::ITexture> renderShadow(Vector2D size, float scale, bool alongWindow, bool nearAtMax, CHyprColor color);
+
+    // One corner square of the drop shadow. A strip fades along one axis only, so a
+    // corner left to the strips is painted with a 1D gradient and ends up asymmetric —
+    // full strength along one edge, nearly invisible along the other. The corner gets
+    // its own radial falloff centred on the window's corner, with the fade radius equal
+    // to the square's side so it meets both adjacent strips exactly.
+    // `nearAtMaxX/Y` say which corner of the texture the window's corner sits in.
+    SP<Render::ITexture> renderShadowCorner(Vector2D size, float scale, bool nearAtMaxX, bool nearAtMaxY, CHyprColor color);
+
     // Logical-px rect of a button's glyph box within the bar, or {} for none/hidden.
     CBox buttonRect(Vector2D size, int btn, bool showButtons);
 
