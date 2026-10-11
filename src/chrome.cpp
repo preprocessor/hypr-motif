@@ -373,7 +373,13 @@ namespace CDE {
 
                 if (d < rScaled) {
                     const double density = 1.0 - (d / rScaled);
-                    const double threshold = (BAYER8[y % 8][x % 8] + 0.5) / 64.0;
+                    // The distance axis must always drive the Bayer ROW, or the two edges
+                    // fade differently at the same offset: BAYER8 is not transpose-symmetric,
+                    // so column k distributes its values differently from row k (measured:
+                    // 75% dots on the bottom vs 50% on the right at 4px out). Bottom walks
+                    // rows with y; the right edge must therefore walk rows with x.
+                    const double threshold = isBottom ? (BAYER8[y % 8][x % 8] + 0.5) / 64.0
+                                                      : (BAYER8[x % 8][y % 8] + 0.5) / 64.0;
                     row[x] = (density > threshold) ? dot : 0;
                 } else {
                     row[x] = 0;
