@@ -305,9 +305,12 @@ bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 20 | 21
 | minimize | 4x4 | 11-14 | bare raised rect, no icon — matches the source exactly |
 | maximize | 9x9 | 9-17 | bare raised rect, in the rightmost field |
 
-The field centre is `x.5` because the field is an odd height. Hand Cairo a fractional
-origin and it blends the glyph across two rows instead of hitting the reference rows —
-floor it.
+The field centre is `x.5` because the field is an odd height. **Floor both axes of the
+glyph origin.** The field's own centre is half a pixel on y, and `FIELD_W - w` is odd
+for the 4px minimize glyph, so its x lands on `.5` too. Hand Cairo a fractional origin
+and it anti-aliases across two rows/columns instead of hitting the reference cells —
+visible as pale half-pixels down one edge of the minimize glyph, and invisible until you
+look for it. Only minimize is affected on x; close and max both divide evenly.
 
 Centring on the bar instead of the field puts every glyph ~2px high, which is very
 visible against the reference. Motif draws **no icon inside any of the three**; do not

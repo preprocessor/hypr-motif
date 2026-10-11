@@ -39,12 +39,20 @@ namespace {
     }
 
     // Motif draws its title-bar buttons as a bare raised glyph on the face — no button
-    // box. The glyph itself is a raised rect: light top/left, dark bottom/right.
-    void glyphFrame(cairo_t* cr, const CBox& b, const SPalette& p) {
-        fill(cr, b.x, b.y, b.w, CDE::SIDE, p.light);
-        fill(cr, b.x, b.y, CDE::SIDE, b.h, p.light);
-        fill(cr, b.x, b.y + b.h - CDE::SIDE, b.w, CDE::SIDE, p.dark);
-        fill(cr, b.x + b.w - CDE::SIDE, b.y, CDE::SIDE, b.h, p.dark);
+    // box. The glyph is a raised rect: `lit` along the top/left, `shade` along the
+    // bottom/right.
+    //
+    // The shade is laid down FIRST so that the lit colour wins wherever the two bevels
+    // meet in a corner — that is what the reference does, and all three glyphs show it:
+    // the top row is lit right across (so the top-right cell is lit) and the bottom-left
+    // cell is lit too. Drawn the other way round, dark overwrites both and the glyph is
+    // one pixel wrong at each corner.
+    void glyphFrame(cairo_t* cr, const CBox& b, const CHyprColor& lit, const CHyprColor& shade) {
+        fill(cr, b.x, b.y + b.h - CDE::SIDE, b.w, CDE::SIDE, shade);
+        fill(cr, b.x + b.w - CDE::SIDE, b.y, CDE::SIDE, b.h, shade);
+
+        fill(cr, b.x, b.y, b.w, CDE::SIDE, lit);
+        fill(cr, b.x, b.y, CDE::SIDE, b.h, lit);
     }
 
     // The one and only bevel painter. The title bar spans the full window width and the
@@ -186,10 +194,11 @@ namespace CDE {
         else
             fieldX = rightFieldStart(size) + SIDE * 2;
 
-        // Floor the top: centre is x.5 for an odd field height, and handing cairo a
-        // fractional origin makes it blend across two rows instead of hitting the
-        // reference rows exactly.
-        return {fieldX + (fieldW - w) / 2, std::floor(centre - h / 2), w, h};
+        // Floor the origin on both axes: the field centre is x.5 for an odd field height, and
+        // `FIELD_W - w` is odd for the 4px minimize glyph. Handing cairo a fractional
+        // origin makes it blend the glyph across two rows/columns instead of hitting the
+        // reference cells exactly, which shows up as pale half-pixels down one edge.
+        return {std::floor(fieldX + (fieldW - w) / 2), std::floor(centre - h / 2), w, h};
     }
 
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize) {
@@ -252,15 +261,12 @@ namespace CDE {
 
                 if (hovered == b)
                     fill(cr, r.x - 1, r.y - 1, r.w + 2, r.h + 2, p.hover);
-                if (pressed == b) {
-                    // Motif inverts the bevel when a button is held.
-                    fill(cr, r.x, r.y, r.w, SIDE, p.dark);
-                    fill(cr, r.x, r.y, SIDE, r.h, p.dark);
-                    fill(cr, r.x, r.y + r.h - SIDE, r.w, SIDE, p.light);
-                    fill(cr, r.x + r.w - SIDE, r.y, SIDE, r.h, p.light);
-                } else {
-                    glyphFrame(cr, r, p);
-                }
+
+                // Motif inverts the bevel when a button is held, so the raised colour
+                // becomes dark. Same painter, colours swapped — the raised edge still
+                // wins the corners. (The held state is not visible in the reference, so
+                // this only mirrors the unheld rule rather than confirming it.)
+                glyphFrame(cr, r, pressed == b ? p.dark : p.light, pressed == b ? p.light : p.dark);
 
                 // All three are bare raised rects; Motif puts no icon in them.
             }
