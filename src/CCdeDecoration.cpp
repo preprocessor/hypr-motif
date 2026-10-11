@@ -115,24 +115,26 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
 void CCdeDecoration::retexture(float scale) {
     // Raster at exactly the box draw() will use, so the texture and the geometry cannot
     // drift apart.
-    const CBox box = outerBox();
+    const CBox  box = outerBox();
+    const bool act = isActive();
 
     if (isTop())
-        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize);
+        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize, act);
     else
-        m_barTex = CDE::renderBorder(m_edge, box.size(), scale);
+        m_barTex = CDE::renderBorder(m_edge, box.size(), scale, act);
 
-    m_lastTitle  = m_window->m_title;
-    m_lastScale  = scale;
-    m_lastSize   = box.size();
-    m_generation = CDE::generation();
+    m_lastTitle   = m_window->m_title;
+    m_lastScale   = scale;
+    m_lastSize    = box.size();
+    m_lastFocused = act ? 1 : 0;
+    m_generation  = CDE::generation();
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
     // Size is part of the cache key. The four edges are positioned independently and a
     // sibling can be repositioned after we raster, which would otherwise leave a
     // stale texture stretched over the new box — e.g. a frame band one pixel thin.
-    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title && m_generation == CDE::generation() && m_lastSize == outerBox().size())
+    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title && m_generation == CDE::generation() && m_lastSize == outerBox().size() && m_lastFocused == (isActive() ? 1 : 0))
         return;
 
     retexture(scale);

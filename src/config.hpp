@@ -9,11 +9,22 @@ namespace CDE {
 
     struct SConfig {
         int        barHeight      = CDE::BAR_HEIGHT;
+        // Inactive (unfocused) window.
         CHyprColor face           = {0.600, 0.600, 0.600, 1};
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
         CHyprColor dark           = {0.306, 0.306, 0.306, 1};
         CHyprColor highlight      = {1.000, 1.000, 1.000, 1};
         CHyprColor title          = {1.000, 1.000, 1.000, 1};
+
+        // Active (focused) window. Face/light/dark are measured from
+        // examples/new-standard.png. The title defaults to black rather than the
+        // reference's #ffffff: white on #eda870 is ~2.9:1, which is poor. Set
+        // color_title_active to #ffffff for reference fidelity.
+        CHyprColor faceActive     = {0.929, 0.659, 0.439, 1};
+        CHyprColor lightActive    = {0.969, 0.851, 0.753, 1};
+        CHyprColor darkActive     = {0.490, 0.349, 0.231, 1};
+        CHyprColor titleActive    = {0.000, 0.000, 0.000, 1};
+
         bool       showButtons    = true;
         int        titleFontSize  = 11;
     };

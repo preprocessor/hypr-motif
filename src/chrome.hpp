@@ -47,11 +47,12 @@ namespace CDE {
     // One texture holds the whole bar, title text included. Drawing the title into
     // the same Cairo surface avoids queueing a second pass element, which the
     // compositor culls when the opaque bar already covers that area.
-    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize);
+    // `active` selects the focused-window palette (see currentPalette in chrome.cpp).
+    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active);
 
     // The frame strip for a non-top edge. `edge` is an eDecorationEdges value; the
     // strip's own width/height is whichever axis is the border thickness.
-    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale);
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active);
 
     // Logical-px rect of a button's glyph box within the bar, or {} for none/hidden.
     CBox buttonRect(Vector2D size, int btn, bool showButtons);

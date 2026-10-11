@@ -18,9 +18,11 @@ namespace {
         CHyprColor face, light, dark, title, hover;
     };
 
-    SPalette currentPalette() {
+    // The active (focused) window gets its own palette; everything else uses the inactive
+    // one. Both sets are configurable, so nothing here is hardcoded.
+    SPalette currentPalette(bool active) {
         const auto c = CDE::config();
-        return {c.face, c.light, c.dark, c.title, CHyprColor{0.72, 0.72, 0.72, 1}};
+        return {active ? c.faceActive : c.face, active ? c.lightActive : c.light, active ? c.darkActive : c.dark, active ? c.titleActive : c.title, CHyprColor{0.72, 0.72, 0.72, 1}};
     }
 
     void fill(cairo_t* cr, double x, double y, double w, double h, const CHyprColor& c) {
@@ -201,9 +203,9 @@ namespace CDE {
         return {std::floor(fieldX + (fieldW - w) / 2), std::floor(centre - h / 2), w, h};
     }
 
-    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize) {
+    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active) {
         const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
-        const SPalette p = currentPalette();
+        const SPalette p = currentPalette(active);
 
         cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
         cairo_t*         cr   = cairo_create(surf);
@@ -304,9 +306,9 @@ namespace CDE {
         return tex;
     }
 
-SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale) {
+SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
         const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
-        const SPalette p = currentPalette();
+        const SPalette p = currentPalette(active);
 
         cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
         cairo_t*         cr   = cairo_create(surf);

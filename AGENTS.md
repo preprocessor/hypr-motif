@@ -97,8 +97,13 @@ arithmetically:
 - Fielded layout: close button left, flexible title field, min/max right, each field
   delimited by a 1px dark-over-light separator. Five separators total: rel 4, 21, and
   `width-40`, `width-23`, `width-6`.
-- Title drawn **into the bar texture** with Cairo's toy text API, in `#ffffff`, centred
-  **within the title field**. A second pass element does not work — see gotcha 4.
+- Title drawn **into the bar texture** with Cairo's toy text API, in the palette's title
+  colour, centred **within the title field**. A second pass element does not work — see
+  gotcha 4.
+- **Focused windows use a separate palette** (tan by default); unfocused windows use the
+  un-suffixed colours. `isActive()` is *polled* from `ensureTextures` rather than hooked
+  to `window.active`, because that event names only the newly-focused window — an event
+  handler would have to track and invalidate the previous one by hand.
 - The bar reserves its configured height (22px), so the client shrinks beneath it.
 
 Known gaps, in the order they bite:
@@ -335,6 +340,15 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 | `show_buttons` | bool | `true` |
 | `color_title` | colour | `#ffffff` |
 | `title_font_size` | int | `11` |
+| `color_face_active` | colour | `#eda870` |
+| `color_light_active` | colour | `#f7d9c0` |
+| `color_dark_active` | colour | `#7d593b` |
+| `color_title_active` | colour | `#000000` |
+
+The un-suffixed colours apply to **unfocused** windows; the `_active` ones to the focused
+window. The active face/light/dark are measured from `examples/new-standard.png`.
+`color_title_active` defaults to black rather than the reference's `#ffffff`, because
+white on `#eda870` is about 2.9:1 — set it to `#ffffff` for reference fidelity.
 
 Two constraints on implementing these:
 
@@ -538,3 +552,24 @@ Deliberately out of scope — do not add these by accident:
 - The status bar strip at the bottom of the client area.
 - The bottom Motif dock / launcher. That is a separate compositor surface, not a decoration.
 - Per-button config toggles. `show_buttons` covers what has actually been asked for.
+## Active-window palette
+
+The focused window paints with `*_active` colours, everything else with the un-suffixed
+ones. Both sets are config values, so neither is hardcoded.
+
+**Focus is polled, not subscribed.** `ensureTextures` compares
+`m_lastFocused == isActive()` alongside the other cache keys, and `draw()` calls it every
+frame, so a focus change re-rasterises on the next frame. The alternative —
+`Event::bus()->m_events.window.active` — only names the newly focused window, not the one
+losing focus, so a handler would have to remember the previous window and invalidate all
+four of its decorations by hand. Polling is a pointer compare and cannot miss an event.
+
+**`isWindowActive()` is not usable here.** It takes `PHLWINDOW` (a shared pointer) while
+`m_window` is a `PHLWINDOWREF` (weak), and weak does not convert to shared — neither
+implicitly nor by constructing from `.get()`, because `CSharedPointer` has no raw-pointer
+constructor. `isActive()` compares the raw pointers against
+`Desktop::focusState()->window()` instead, which avoids building a shared pointer to ask a
+yes/no question.
+
+`m_lastFocused` is an **int** initialised to `-1`, not a bool. A bool defaulting to false
+would read as a valid cache hit on the first frame of an unfocused window.
