@@ -92,7 +92,8 @@ arithmetically:
 - **Mitred corners on all four edges**, not overlapping rectangles — see `## Corners`.
   The bottom pair comes from CDE-7.png, the top pair from new-standard.png; both verified
   pixel-for-pixel against a live render.
-- **Corner grab areas**: a 21px square at each corner delimited by separator lines.
+- **Corner grab areas**: a 21px square at each corner delimited by separator lines, on
+  all four corners.
 - Fielded layout: close button left, flexible title field, min/max right, each field
   delimited by a 1px dark-over-light separator. Five separators total: rel 4, 21, and
   `width-40`, `width-23`, `width-6`.
@@ -208,16 +209,24 @@ screen in the bar's top rows. No reordering is needed.
 
 ### Corner grab areas
 
-A 21px square at each corner, marked off by a `dark(1) + light(1)` rule:
+A 21px square at each corner, marked off by a `dark(1) + light(1)` rule. All **four**
+corners have both rules; the top ones were added after the bottom pair was already
+correct, so do not assume "the corners" means the bottom two.
 
 | rule | position | spans |
 |---|---|---|
-| vertical, left | bar-rel 21 (dark), 22 (light) | bottom strip rows 1-3 only |
-| vertical, right | bar-rel `width-23` (dark), `width-23+1` (light) | bottom strip rows 1-3 only |
+| vertical, left | bar-rel 21 (dark), 22 (light) | bar-rel **1..21**, broken at row 5 |
+| vertical, right | bar-rel `width-23` (dark), `width-23+1` (light) | same |
+| horizontal, top | bar-rel 21 (dark row), 22 (light row) | full frame width |
 | horizontal, bottom | 21px up from the bottom edge | full frame width |
 
-The vertical rule is **not** drawn on the strip's first and last rows — it appears only
-on the middle three, so it blends into the bands above and below.
+The vertical rule reaches **bar-rel 1..21**, not just the field rows: unlike the field
+separators, which start below the bevel at row 6, the grab rule is drawn separately so it
+can start one row under the top bevel. It lands on the same columns as the left-field and
+mid-right separators, so it must be drawn as its own pass rather than by widening those.
+
+It is **broken at row 5**, where the groove's light row wins — visible as a 1px gap. The
+reference does the same, so reproduce it rather than "fixing" it.
 
 The horizontal rule's two rows are asymmetric between the sides, and that is deliberate:
 

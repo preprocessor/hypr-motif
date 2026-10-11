@@ -227,6 +227,23 @@ namespace CDE {
             separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
         }
 
+        // The corner grab's vertical rule spans the full height of the grab square, from
+        // bar-rel 1 to the bottom edge — unlike the field separators, which start below
+        // the bevel. It lands on the same columns as the left-field and mid-right
+        // separators, but reaches further, so it is drawn separately rather than by
+        // widening those. The groove's light row breaks it, which is what the reference
+        // shows, hence the two spans.
+        if (size.x > CORNER_GRAB * 2 + 4) {
+            const double above = BEVEL + GROOVE + 1;          // rows 1..BEVEL+GROOVE
+            const double below = above + GROOVE + 1;          // rows BEVEL+GROOVE+2..h-1
+            auto        grabRule = [&](double x) {
+                separator(cr, x, 1, above, p);
+                separator(cr, x, below, size.y - below, p);
+            };
+            grabRule(CORNER_GRAB);
+            grabRule(size.x - CORNER_GRAB - 2);
+        }
+
         if (config().showButtons) {
             for (int b = 0; b < BTN_COUNT; ++b) {
                 const CBox r = buttonRect(size, b, true);
@@ -308,9 +325,12 @@ SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale) {
         // separators already fall exactly on CORNER_GRAB.
         if (edge == DECORATION_EDGE_LEFT) {
             drawCorner(cr, 0, 0, TL, p);
+            // Horizontal rule at each end. The top one lands on the bar's bottom edge.
+            grabSeparator(cr, 0, CDE::CORNER_GRAB, 1, true, false, p);
             grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, false, p);
         } else if (edge == DECORATION_EDGE_RIGHT) {
             drawCorner(cr, 0, 0, TR, p);
+            grabSeparator(cr, 0, CDE::CORNER_GRAB, 1, true, true, p);
             grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, true, p);
         } else if (edge == DECORATION_EDGE_BOTTOM) {
             drawCorner(cr, 0, 0, BL, p);
