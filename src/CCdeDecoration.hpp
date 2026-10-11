@@ -9,6 +9,7 @@
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 
 #include "chrome.hpp"
+#include "config.hpp"
 
 class CCdeDecoration : public IHyprWindowDecoration {
   public:
@@ -38,6 +39,7 @@ class CCdeDecoration : public IHyprWindowDecoration {
 
     std::string m_lastTitle;
     float       m_lastScale = 0.f;
+    uint64_t    m_generation = 0;
     int         m_hovered   = CDE::BTN_NONE;
     int         m_pressed   = CDE::BTN_NONE;
     Vector2D    m_dragStart;

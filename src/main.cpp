@@ -10,6 +10,7 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 
 #include "CCdeDecoration.hpp"
+#include "config.hpp"
 
 static HANDLE      PHANDLE   = nullptr;
 static const char* DECO_NAME = "CDE";
@@ -35,7 +36,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (std::string(__hyprland_api_get_hash()) != std::string(__hyprland_api_get_client_hash()))
         throw std::runtime_error("[cde] ABI mismatch: rebuild against the running hyprland");
 
+    CDE::registerConfig(handle);
+
     static auto P = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); });
+
+    // IValue has no per-value change callback, so live reload has to go through
+    // the config event and a generation counter the decorations compare against.
+    static auto PR = Event::bus()->m_events.config.reloaded.listen([] { CDE::bumpGeneration(); });
 
     // Windows that already exist are not covered by the open event.
     for (auto& w : Desktop::windowState()->windows())

@@ -43,6 +43,8 @@ default stdenv. If you bump `flake.lock`, rebuild before you touch your running 
 src/main.cpp              plugin entry: pluginAPIVersion / pluginInit / pluginExit
 src/CCdeDecoration.hpp    IHyprWindowDecoration subclass — declaration
 src/CCdeDecoration.cpp    positioning, draw(), input handling
+src/config.hpp            config struct, generation counter
+src/config.cpp            plugin:cde:* value registration + live-read
 src/chrome.hpp            layout constants, button rects, Cairo entry points
 src/chrome.cpp            Cairo drawing of the bevels, title bar and buttons
 CMakeLists.txt
@@ -74,10 +76,16 @@ it, rather than the chrome floating over the client area.
 
 Renders today, confirmed by screenshot rather than by assumption:
 
-- Motif-grey title bar with a raised outer bevel.
-- Three beveled buttons with glyphs (minimize, maximize, close).
-- Title text rendered via `CHyprRenderer::renderText` and blitted centred.
-- The bar reserves 22px, so the client area shrinks beneath it.
+- Motif-grey title bar on the **measured** palette (`#999999` face, `#d1d1d1` light,
+  `#4e4e4e` dark), not the earlier hand-picked greys.
+- Fielded layout: close button left, flexible title field, min/max right, each field
+  delimited by a 1px dark-over-light separator, plus a 3px white highlight on the
+  bottom edge.
+- Title centred **within the title field**, not across the bar — the fields are
+  asymmetric, so centring across the bar looks visibly off.
+- `plugin:cde:*` config values registered and honoured, including live reload via the
+  generation counter.
+- The bar reserves its configured height, so the client shrinks beneath it.
 
 Known gaps, in the order they bite:
 
@@ -85,8 +93,8 @@ Known gaps, in the order they bite:
   `onInputOnDeco`'s `pos` is assumed **decoration-local**. If it is actually global,
   nothing will ever register a hit. Check this first — `barDeco.cpp:211` subtracts
   `assignedBoxGlobal().pos()` from raw mouse coords, which hints the raw form is global.
-- **The bar is not yet fielded.** Real CDE divides it into three bevel-delimited
-  regions; ours is flat with all three buttons on the left. See `## Title bar anatomy`.
+- **`bar_height` changes at runtime are untested.** It feeds `desiredExtents`, so it
+  only takes effect once the positioner re-runs.
 - **The active border still double-draws** — see `## Known unknown`.
 
 ## Measured reference values
@@ -140,7 +148,8 @@ fields read as three panels rather than one bar.
 
 ## Config options
 
-Planned; all namespaced `plugin:cde:` and registered with `addConfigValueV2`.
+All namespaced `plugin:cde:`, registered with `addConfigValueV2` in `src/config.cpp`.
+Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 
 | Key | Type | Default |
 |---|---|---|
@@ -197,6 +206,10 @@ from the old build. Build, then `cp build/libcde.so build/libcde-<new>.so` and l
 Corollary: `printf` from a plugin goes nowhere when Hyprland was started by a greeter,
 because its stdout is a socket. To debug, append to a file under `$HOME`.
 
+Corollary 2: setting a plugin config value with `hyprctl eval 'hl.config({...})'` does
+**not** reliably fire `config.reloaded`, so the bar can keep the old theme even though
+`hyprctl getoption` reports the new value. Follow it with `hyprctl reload`.
+
 ## Reference implementation
 
 `hyprbars` — `/home/wyspr/Repos/hyprland-plugins/hyprbars` — is a working Hyprland
@@ -237,17 +250,14 @@ behaviour empirically before trying to "fix" it in code.
 
 ## Roadmap
 
-Agreed next increment — **title bar fidelity plus config options**, in this order:
+The title bar fidelity increment is done. Remaining, in the order worth doing:
 
-1. Rework `SPalette` from one scalar per role to three floats, so colour config values
-   map straight through. Today `setGrey` forces R=G=B, which is why nothing can be warm.
-2. Apply the measured values and draw the fielded layout: left close field, flexible
-   title field, right min/max field, each delimited by a 1px dark-over-light separator.
-   Add the 3px white highlight along the bottom edge.
-3. Move `buttonRect` to the 1-left/2-right arrangement described above.
-4. Wire the config table. Bump a generation counter on `config.reloaded`; decorations
-   compare it in `ensureTextures()` and re-rasterise on mismatch.
-5. Verify button clicks, which has never been exercised.
+1. **Verify button clicks.** Never exercised — see the hit-testing note in `## Status`.
+   This is the single most valuable unknown left.
+2. Make `bar_height` changes take effect at runtime (needs `damageEntire()` on reload).
+3. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
+4. Optional: an active/inactive title colour pair, so the bar reflects focus the way
+   CDE's does.
 
 ## Non-goals
 

@@ -19,7 +19,7 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     info.edges          = DECORATION_EDGE_TOP;
     info.priority       = 10005; // outrank hyprland's own border decoration
     info.reserved       = true;
-    info.desiredExtents = {{0, CDE::BAR_HEIGHT}, {0, 0}};
+    info.desiredExtents = {{0, CDE::config().barHeight}, {0, 0}};
     return info;
 }
 
@@ -58,14 +58,15 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
 
 void CCdeDecoration::retexture(float scale) {
     m_barTex   = CDE::renderBar(m_assigned.size(), scale, m_hovered, m_pressed);
-    m_titleTex = CDE::renderTitle(m_window->m_title, scale);
+    m_titleTex = CDE::renderTitle(m_window->m_title, scale, CDE::config().titleFontSize);
 
-    m_lastTitle = m_window->m_title;
-    m_lastScale = scale;
+    m_lastTitle    = m_window->m_title;
+    m_lastScale    = scale;
+    m_generation   = CDE::generation();
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
-    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title)
+    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title && m_generation == CDE::generation())
         return;
 
     retexture(scale);
@@ -73,10 +74,11 @@ void CCdeDecoration::ensureTextures(float scale) {
 
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any) {
     const Vector2D size = m_assigned.size();
+    const bool     buttons = CDE::config().showButtons;
 
     auto buttonAt = [&](const Vector2D& p) -> int {
         for (int b = 0; b < CDE::BTN_COUNT; ++b) {
-            const CBox r = CDE::buttonRect(size, b);
+            const CBox r = CDE::buttonRect(size, b, buttons);
             if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
                 return b;
         }
@@ -168,7 +170,11 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     queue(m_barTex, global);
 
     if (m_titleTex) {
-        const Vector2D ts = m_titleTex->m_size;
-        queue(m_titleTex, {global.x + (global.w - ts.x) / 2, global.y + (global.h - ts.y) / 2, ts.x, ts.y});
+        // Centre in the title field, not the whole bar — the button fields are not
+        // symmetric, so centring across the bar puts the title visibly right of centre.
+        // titleField is bar-relative, so the bar's global offset has to be added back.
+        const CBox      field = CDE::titleField(global.size());
+        const Vector2D ts    = m_titleTex->m_size;
+        queue(m_titleTex, {global.x + field.x + (field.w - ts.x) / 2, global.y + field.y + (field.h - ts.y) / 2, ts.x, ts.y});
     }
 }
