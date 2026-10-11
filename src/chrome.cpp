@@ -19,7 +19,7 @@ namespace {
 
     SPalette currentPalette() {
         const auto c = CDE::config();
-        return {c.face, c.light, c.dark, CHyprColor{c.title.r, c.title.g, c.title.b, 1}, CHyprColor{0.72, 0.72, 0.72, 1}};
+        return {c.face, c.light, c.dark, c.title, CHyprColor{0.72, 0.72, 0.72, 1}};
     }
 
     void fill(cairo_t* cr, double x, double y, double w, double h, const CHyprColor& c) {
@@ -37,8 +37,8 @@ namespace {
         fill(cr, x + CDE::SIDE, y, CDE::SIDE, h, p.light);
     }
 
-    // Motif draws its title-bar buttons as a bare glyph on the face — no button box.
-    // The glyph itself is a raised shape: light top/left, dark bottom/right.
+    // Motif draws its title-bar buttons as a bare raised glyph on the face — no button
+    // box. The glyph itself is a raised rect: light top/left, dark bottom/right.
     void glyphFrame(cairo_t* cr, const CBox& b, const SPalette& p) {
         fill(cr, b.x, b.y, b.w, CDE::SIDE, p.light);
         fill(cr, b.x, b.y, CDE::SIDE, b.h, p.light);
@@ -47,25 +47,13 @@ namespace {
     }
 
     void drawClose(cairo_t* cr, const CBox& b, const SPalette& p) {
-        const double i = 3;
-        cairo_set_line_width(cr, 1.5);
+        cairo_set_line_width(cr, 1);
         cairo_set_source_rgb(cr, p.dark.r, p.dark.g, p.dark.b);
-        cairo_move_to(cr, b.x + i, b.y + i);
-        cairo_line_to(cr, b.x + b.w - i, b.y + b.h - i);
-        cairo_move_to(cr, b.x + b.w - i, b.y + i);
-        cairo_line_to(cr, b.x + i, b.y + b.h - i);
+        cairo_move_to(cr, b.x + 3, b.y + 1);
+        cairo_line_to(cr, b.x + b.w - 3, b.y + b.h - 2);
+        cairo_move_to(cr, b.x + b.w - 3, b.y + 1);
+        cairo_line_to(cr, b.x + 3, b.y + b.h - 2);
         cairo_stroke(cr);
-    }
-
-    void drawMin(cairo_t* cr, const CBox& b, const SPalette& p) {
-        fill(cr, b.x + 2, b.y + b.h - 4, b.w - 4, 2, p.dark);
-    }
-
-    void drawMax(cairo_t* cr, const CBox& b, const SPalette& p) {
-        fill(cr, b.x + 2, b.y + 2, b.w - 4, CDE::SIDE, p.dark);
-        fill(cr, b.x + 2, b.y + 2, CDE::SIDE, b.h - 4, p.dark);
-        fill(cr, b.x + b.w - 3, b.y + 2, CDE::SIDE, b.h - 4, p.dark);
-        fill(cr, b.x + 2, b.y + b.h - 3, b.w - 4, CDE::SIDE, p.dark);
     }
 
 } // namespace
@@ -77,9 +65,10 @@ namespace CDE {
         return SIDE * 2 + FIELD_W;
     }
 
-    // Right pair: [18px field][sep][18px field][sep], then 2px of face.
+    // Right side has THREE separators: title/right-pair, between the pair, and the
+    // outer right edge. The pair therefore starts RIGHT_MARGIN + 2 units in.
     double rightFieldStart(Vector2D size) {
-        return size.x - (2 * (FIELD_W + SIDE * 2) + SIDE * 2);
+        return size.x - RIGHT_MARGIN - 2 * (FIELD_W + SIDE * 2);
     }
 
     CBox titleField(Vector2D size) {
@@ -87,23 +76,32 @@ namespace CDE {
         return {x, 0, std::max(0.0, rightFieldStart(size) - x), size.y};
     }
 
+    // Motif's title-bar glyphs, measured from example.png at BAR_HEIGHT 25.
+    // All three share one centre line at y=17.5; only the sizes differ:
+    //   left (window menu)  12 x 4
+    //   minimize             4 x 4
+    //   maximize            12 x 12
     CBox buttonRect(Vector2D size, int btn, bool showButtons) {
         if (!showButtons || btn < 0 || btn >= BTN_COUNT)
             return {};
 
-        // Content runs from below the groove to above the bottom edge; centre in that.
-        const double top    = BEVEL + 2 + GROOVE * 2;
-        const double avail  = size.y - top - SIDE;
-        const double by     = top + std::max(0.0, (avail - BTN_SIZE) / 2);
-        const double inset  = (FIELD_W - BTN_SIZE) / 2;
+        const double centre = size.y * 18.0 / 25.0;
+
+        double w = 4, h = 4;
+        if (btn == BTN_MAX)
+            w = h = 12;
+        else if (btn == BTN_CLOSE)
+            w = 12, h = 4;
+
+        const double y = centre - h / 2;
 
         if (btn == BTN_CLOSE)
-            return {SIDE * 2 + inset, by, BTN_SIZE, BTN_SIZE};
+            return {SIDE * 2 + (FIELD_W - w) / 2, y, w, h};
 
-        // Right pair, laid out from the right edge inward.
-        const int    idx   = btn - BTN_MIN;
-        const double right = size.x - SIDE * 2 - idx * (FIELD_W + SIDE * 2) - FIELD_W;
-        return {right + inset, by, BTN_SIZE, BTN_SIZE};
+        // Maximize occupies the rightmost field, minimize the one to its left.
+        const int    k          = btn == BTN_MAX ? 0 : 1;
+        const double fieldRight = size.x - RIGHT_MARGIN - 1 - k * (FIELD_W + SIDE * 2);
+        return {fieldRight - FIELD_W + 1 + (FIELD_W - w) / 2, y, w, h};
     }
 
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize) {
@@ -129,9 +127,11 @@ namespace CDE {
         const double lfEnd = leftFieldEnd(size), rfStart = rightFieldStart(size);
         if (lfEnd < rfStart) {
             const double sepTop = BEVEL + 2 + GROOVE * 2;
-            separator(cr, lfEnd, sepTop, size.y - sepTop - SIDE, p);
-            separator(cr, rfStart, sepTop, size.y - sepTop - SIDE, p);
-            separator(cr, rfStart + FIELD_W + SIDE * 2, sepTop, size.y - sepTop - SIDE, p);
+            const double sepH   = size.y - sepTop - SIDE;
+            separator(cr, lfEnd, sepTop, sepH, p);
+            separator(cr, rfStart, sepTop, sepH, p);
+            separator(cr, rfStart + FIELD_W + SIDE * 2, sepTop, sepH, p);
+            separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
         }
 
         if (config().showButtons) {
@@ -154,9 +154,7 @@ namespace CDE {
 
                 switch (b) {
                     case BTN_CLOSE: drawClose(cr, r, p); break;
-                    case BTN_MIN: drawMin(cr, r, p); break;
-                    case BTN_MAX: drawMax(cr, r, p); break;
-                    default: break;
+                    default: break; // Motif's min/max are bare raised rects, no icon
                 }
             }
         }

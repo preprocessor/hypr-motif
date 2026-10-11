@@ -24,7 +24,7 @@ namespace CDE {
     inline constexpr int GROOVE      = 1; // dark+light groove below the bevel
     inline constexpr int SIDE        = 1; // outer side bevel
     inline constexpr int FIELD_W     = 18; // width of a button field
-    inline constexpr int BTN_SIZE    = 13; // glyph box inside a field
+    inline constexpr int RIGHT_MARGIN = 4; // window edge to the outermost separator
 
     enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
 

@@ -131,14 +131,14 @@ Window top-left is image (80, 312); logical px = image px ÷ 2.
 Horizontal fields, left to right:
 
 ```
-| bevel | close field | sep | title field (flexible)      | sep | min/max field | bevel |
-   1px      18px       1px                                1px      38px        1px
+| bevel | close field | sep | title field (flexible)      | sep | min field | sep | max field | sep | edge |
+   1px      18px       1px                                1px      18px      1px     18px      1px   4px
 ```
 
-The right field holds two buttons with a separator roughly 20px in. The left field holds
-one — in real Motif that is the window-menu button; we put close there to keep the
-1-left/2-right shape while retaining all three buttons. To move close to the right, flip
-the ordering in `buttonRect` — it is one function.
+The right pair holds two buttons. The left field holds one — in real Motif that is the
+window-menu button; we put close there to keep the 1-left/2-right shape while retaining
+all three buttons. To move close to the right, flip the ordering in `buttonRect` — it is
+one function.
 
 Vertical bevel order, top-down, for a `BAR_HEIGHT` of **25**:
 
@@ -154,6 +154,22 @@ Vertical bevel order, top-down, for a `BAR_HEIGHT` of **25**:
 Separators are a 1px dark line over a 1px light line — that pairing is what makes the
 fields read as three panels rather than one bar. Buttons are a bare raised glyph box on
 the face; Motif does not draw a button *box* around the title-bar controls.
+
+The right side has **three** separators, not two: title/right-pair, between the pair,
+and the outer right edge 4px in from the window edge. Measured from the right, the
+separators sit at 4, 24 and 44 logical px. Missing the third one is what makes a first
+attempt look visibly wrong on the right-hand end.
+
+Glyphs, all sharing one centre line at y=18 for a `BAR_HEIGHT` of 25:
+
+| Glyph | Size | Notes |
+|---|---|---|
+| left (window menu) | 12x4 | we draw close here, as a 12x4 raised rect plus a small X |
+| minimize | 4x4 | bare raised rect, no icon — matches the source exactly |
+| maximize | 12x12 | bare raised rect, in the rightmost field |
+
+Minimize is in the field left of maximize. Getting that order backwards is invisible in
+the code and obvious on screen.
 
 ## Config options
 
