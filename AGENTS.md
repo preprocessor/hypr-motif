@@ -74,18 +74,27 @@ it, rather than the chrome floating over the client area.
 
 ## Status
 
-Renders today, confirmed by screenshot rather than by assumption:
+Renders today, confirmed by screenshot rather than by assumption. **All geometry below
+was verified against live pixels** (kitty at 1674x1365 client, 1684px bar), not just
+arithmetically:
 
 - Motif-grey title bar on the **measured** palette (`#999999` face, `#d1d1d1` light,
   `#4e4e4e` dark), not the earlier hand-picked greys.
-- A 4px raised frame on the left, right and bottom edges, as separate reserved
-  decorations: 2px light + 2px face on the outer left, face + 2px dark on the outer
-  right. The client genuinely shrinks inward — it is not an overlay.
+- A **5px** frame on the left, right and bottom edges, as separate reserved decorations.
+  It is a three-band bevel — `light, face, dark` — not a two-tone rule. Left is
+  `light(2) face(2) dark(1)`; right and bottom are `light(1) face(2) dark(2)`. The
+  client genuinely shrinks inward; it is not an overlay.
+- The frame runs the **full** window height, alongside the title bar as well as below it.
+  The side strips are not "below the bar" — measured down the window edge, the bands are
+  continuous from the top.
+- The title bar spans the **full** window width, frame bands included. All four corners
+  are seamless.
 - Fielded layout: close button left, flexible title field, min/max right, each field
-  delimited by a 1px dark-over-light separator.
+  delimited by a 1px dark-over-light separator. Five separators total: rel 4, 21, and
+  `width-40`, `width-23`, `width-6`.
 - Title drawn **into the bar texture** with Cairo's toy text API, in `#ffffff`, centred
   **within the title field**. A second pass element does not work — see gotcha 4.
-- The bar reserves its configured height (25px), so the client shrinks beneath it.
+- The bar reserves its configured height (22px), so the client shrinks beneath it.
 
 Known gaps, in the order they bite:
 
@@ -101,9 +110,13 @@ Known gaps, in the order they bite:
 
 ## Measured reference values
 
-Sampled from `example.png`. **The PNG is 2x-scaled, so image pixels ÷ 2 = logical pixels.**
-Re-measure rather than eyeball; the greys differ by only a few counts and eyeballing
-gets them wrong.
+**`examples/CDE-7.png` is the authoritative reference.** It is 1013x765 at **1:1** with
+no scaling to undo, so every pixel is a real CDE pixel.
+
+`examples/example.png` is the older 2x-scaled capture. It **disagrees** with CDE-7 on two
+things, and where they conflict, CDE-7 wins: title bar height (25 vs 22) and the
+right-hand field layout (three separators at 43/23/3 from the right edge vs two). Do not
+re-derive geometry from example.png.
 
 | Element | Hex | Notes |
 |---|---|---|
@@ -119,15 +132,16 @@ gets them wrong.
 measured from a column scan that happened to land on the title glyphs. The bar has no
 highlight strip; the only `#ffffff` in it is the title text.
 
-**Extract the grid with step 2 on BOTH axes.** The PNG is 2x-scaled, so one logical
-pixel is 2x2 image pixels. Sampling x at step 2 but y at step 1 produces a grid that is
-right in one direction and nonsense in the other, and yields plausible-looking but
-wrong measurements. Sample every 2nd row *and* every 2nd column.
+**Extract the grid with step 2 on BOTH axes — but only for `example.png`.** That PNG is
+2x-scaled, so one logical pixel is 2x2 image pixels. Sampling x at step 2 but y at step 1
+produces a grid that is right in one direction and nonsense in the other, and yields
+plausible-looking but wrong measurements. Sample every 2nd row *and* every 2nd column.
+`CDE-7.png` needs no such handling — it is 1:1.
 
-**Anchor every row index to the bar, not the window.** The title bar starts at window
-row 3 — rows 0-2 are the window frame. Reporting a glyph as "row 16" when it means
-window row 16 puts it 3px lower than reality, which looks exactly like a vertical
-centring bug and is not one. Compare bar-relative to bar-relative, or subtract 3.
+**Anchor every row index to the bar, not the window.** In `example.png` the title bar
+starts at window row 3 — rows 0-2 are the window frame. Reporting a glyph as "row 16"
+when it means window row 16 puts it 3px lower than reality, which looks exactly like a
+vertical centring bug and is not one. Compare bar-relative to bar-relative.
 
 The title bar greys are genuinely **neutral** (R=G=B). The warm tone that reads as
 "authentic CDE" in the screenshot comes from the *client* background, which we do not
@@ -135,14 +149,14 @@ draw. Do not warm the chrome to match the impression.
 
 ## Title bar anatomy
 
-Measured across the Application Manager title bar (`example.png`, grey variant).
-Window top-left is image (80, 312); logical px = image px ÷ 2.
+Measured across the Application Manager title bar in `examples/CDE-7.png`. That window is
+551px wide at 1:1, so bar-relative offsets are real pixels — no division.
 
 Horizontal fields, left to right:
 
 ```
 | bevel | close field | sep | title field (flexible)      | sep | min field | sep | max field | sep | edge |
-   1px      18px       1px                                1px      18px      1px     18px      1px   4px
+   1px      15px       1px                                1px      15px      1px     15px      1px   4px
 ```
 
 The right pair holds two buttons. The left field holds one — in real Motif that is the
@@ -150,14 +164,14 @@ window-menu button; we put close there to keep the 1-left/2-right shape while re
 all three buttons. To move close to the right, flip the ordering in `buttonRect` — it is
 one function.
 
-Vertical bevel order, top-down, for a `BAR_HEIGHT` of **25**:
+Vertical bevel order, top-down, for a `BAR_HEIGHT` of **22**:
 
 ```
 2px  raised light   (outer bevel)
 2px  face
 1px  dark           ┐ groove
 1px  light          ┘
-17px face           (fields, glyphs and title live here)
+15px face           (fields, glyphs and title live here)
 1px  dark           (bottom edge)
 ```
 
@@ -165,30 +179,38 @@ Separators are a 1px dark line over a 1px light line — that pairing is what ma
 fields read as three panels rather than one bar. Buttons are a bare raised glyph box on
 the face; Motif does not draw a button *box* around the title-bar controls.
 
-The right side has **three** separators, not two: title/right-pair, between the pair,
-and the outer right edge 4px in from the window edge. Measured from the right, the
-separators sit at 4, 24 and 44 logical px. Missing the third one is what makes a first
-attempt look visibly wrong on the right-hand end.
+The right side has **three** separators, not two: title/min, between the pair, and the
+outer right edge. They sit at `width-40`, `width-23` and `width-6` bar-relative, which
+at the reference width of 551 is 511, 528 and 545. Missing the third is what makes a
+first attempt look visibly wrong on the right-hand end.
 
-Glyphs, measured for a `BAR_HEIGHT` of 25. All three share one centre line, and it is
+There is also a separator on the **left** at bar-rel 4, before the close field — the field
+is inset within the bar rather than butting against the frame bevel. Easy to miss; the
+live render confirms all five.
+
+Glyphs, measured for a `BAR_HEIGHT` of 22. All three share one centre line, and it is
 **not** the centre of the bar — it is the centre of the *field*, the band between the
 groove and the bottom edge:
 
 ```
-bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 23 | 24
-          light  face  D  l  |------ field, centre 15 --------| dark
-                                      ^ all glyphs centre here
+bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 20 | 21
+          light  face  D  l  |------ field, centre 13.5 -----| dark
+                                       ^ all glyphs centre here
 ```
 
 | Glyph | Size | Bar rows | Notes |
 |---|---|---|---|
-| left (window menu) | 12x4 | 13-16 | we draw close here — a bare raised rect, no X |
-| minimize | 4x4 | 13-16 | bare raised rect, no icon — matches the source exactly |
-| maximize | 12x12 | 9-20 | bare raised rect, in the rightmost field |
+| left (window menu) | 9x4 | 11-14 | we draw close here — a bare raised rect, no X |
+| minimize | 4x4 | 11-14 | bare raised rect, no icon — matches the source exactly |
+| maximize | 9x9 | 9-17 | bare raised rect, in the rightmost field |
 
-Centring on the bar instead of the field puts every glyph ~3px low, which is very
+The field centre is `x.5` because the field is an odd height. Hand Cairo a fractional
+origin and it blends the glyph across two rows instead of hitting the reference rows —
+floor it.
+
+Centring on the bar instead of the field puts every glyph ~2px high, which is very
 visible against the reference. Motif draws **no icon inside any of the three**; do not
-add one, and in particular do not draw an X — a 12x4 box has no room for one and it
+add one, and in particular do not draw an X — a 9x4 box has no room for one and it
 renders as a dark blob.
 
 Minimize is in the field left of maximize. Getting that order backwards is invisible in
@@ -201,7 +223,7 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 
 | Key | Type | Default |
 |---|---|---|
-| `bar_height` | int | `25` |
+| `bar_height` | int | `22` |
 | `color_face` | colour | `#999999` |
 | `color_light` | colour | `#d1d1d1` |
 | `color_dark` | colour | `#4e4e4e` |
@@ -239,31 +261,47 @@ g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement
 `currentPass()` is public (`render/Renderer.hpp:139`). This is the whole reason hyprbars
 carries its own `BarPassElement`.
 
-**2. Every edge derives from `getBoxWithIncludedDecos`, not from `assignedGeometry`.**
-`assignedGeometry` is relative to the edge's defined point, and the positioner anchors
-each decoration to the *outer* window — so translating by the edge point, or adding
-`window->logicalBox()`, is wrong by the bar height. `logicalBox()` is worse still: it
-does not report the window box at all (it returned `(12,-1,1708,1464)` for a window
-Hyprland reported at `[31,52] 1670x1357`). Use one outer box and slice it per edge:
+**2. Position every edge from `getWindowDecorationBox(this)`, not from
+`assignedGeometry` or `logicalBox()`.** `assignedGeometry` is relative to the edge's
+defined point and the positioner anchors each decoration to the *outer* window, so
+translating by the edge point double-offsets by the bar height. `logicalBox()` is worse
+still: it does not report the window box at all (it returned `(12,-1,1708,1464)` for a
+window Hyprland reported at `[31,52] 1670x1357`).
 
-```cpp
-const CBox outer = g_pDecorationPositioner->getBoxWithIncludedDecos(m_window.lock()); // needs a LOCKED ptr
-const double barH = CDE::config().barHeight;
-TOP:    {outer.x,                    outer.y,                 outer.w, barH}
-LEFT:   {outer.x,                    outer.y + barH,          BORDER,   outer.h - barH - BORDER}
-RIGHT:  {outer.x + outer.w - BORDER, outer.y + barH,          BORDER,   outer.h - barH - BORDER}
-BOTTOM: {outer.x,                    outer.y + outer.h - BORDER, outer.w, BORDER}
-```
+Do **not** reach for `getBoxWithIncludedDecos()` either — it already accounts for the
+space we ourselves reserved, so slicing it per edge is a feedback loop that drifts by
+the bar height. The bar must span the full `outer.w` or it is inset by the frame width
+on each side, leaving a wallpaper gap in both top corners.
 
-The bar must span the full `outer.w` or it is inset by the frame width on each side,
-leaving a wallpaper gap in both top corners.
+**Corollary: `own` is a DIFFERENT rectangle for each edge, so never derive all edges
+from one decoration's box.** For the top, `getWindowDecorationBox(this)` is the client
+box; for the left it already starts at the window's outer edge. Re-expanding a uniform
+`own.x - BORDER` therefore shifts the side frames a whole border further out than the
+client and leaves **5px of bare wallpaper between frame and client on both sides**. Take
+the outer span from the sibling decorations instead — `outerBox()` in `CCdeDecoration.cpp`
+reads `CDE:left` / `CDE:right` / `CDE` / `CDE:bottom` and lets the compositor's own
+placement define the ring. `draw()`, `retexture()` and hit-testing all call it, because a
+texture rastered at one size and stretched over another puts the separators out of
+register with the buttons.
 
 **3. Rebuilding over the same path does not reload.** `hyprctl plugin unload` + `load`
 on a rebuilt `build/libcde.so` silently keeps running the **old** code — the compositor
 holds the previous, now-deleted inode, and `hyprctl plugin list` shows stale metadata
 from the old build. Build, then `cp build/libcde.so build/libcde-<new>.so` and load the
-*new* path. Check `ls -l /proc/$(pgrep -x Hyprland)/maps | grep cde` — it shows
-`(deleted)` when you have been fooled.
+*new* path. Check `grep -o "libcde[a-z0-9.-]*\.so" /proc/$(pgrep -f "bin/Hyprland" | head -1)/maps`
+— it shows `(deleted)` when you have been fooled, and more than one `libcde-*.so` means
+you have two copies fighting over the same decorations.
+
+Corollary: **`hyprctl plugin unload` only works by path.** Unloading by handle (or
+`-1`, or a comma list) prints `plugin not loaded` and is a **no-op**. The handle keeps
+appearing in `hyprctl plugin list` and the old copy keeps drawing. Use
+`hyprctl plugin unload /full/path/libcde-<old>.so` and confirm with
+`hyprctl plugin list | grep -c "Plugin cde"` returning 1.
+
+Corollary: **`pgrep -x Hyprland` returns nothing even when Hyprland is running.** The
+process is `/etc/profiles/per-user/wyspr/bin/Hyprland`, which does not match the exact
+name `-x`. Use `pgrep -f "bin/Hyprland"`. Believing the `-x` result leads to concluding
+the compositor is dead and restarting a healthy session.
 
 Corollary: `printf` from a plugin goes nowhere when Hyprland was started by a greeter,
 because its stdout is a socket. To debug, append to a file under `$HOME`.
@@ -271,6 +309,11 @@ because its stdout is a socket. To debug, append to a file under `$HOME`.
 Corollary 2: setting a plugin config value with `hyprctl eval 'hl.config({...})'` does
 **not** reliably fire `config.reloaded`, so the bar can keep the old theme even though
 `hyprctl getoption` reports the new value. Follow it with `hyprctl reload`.
+
+Corollary 3: **never `rm -rf "$XDG_RUNTIME_DIR/hypr"`**, not even after
+`pgrep` suggests it is dead. That directory holds the live instance's `socket.sock` and
+`socket2.sock`; deleting them leaves a perfectly healthy compositor that `hyprctl` can no
+longer reach, and there is no way to reattach. Only a compositor restart recovers.
 
 **4. A second pass element inside an opaque one is silently dropped.** Queueing the bar
 and the title as two `CTexPassElement`s draws the bar and nothing else — no error, the
@@ -329,8 +372,17 @@ simpler but clips the client by the border width.
 `DECORATION_CUSTOM` instances per window, because `getDecorationByType` is declared but
 never called internally and `DECORATION_CUSTOM` has no special-casing in the headers.
 
-- `renderBorder(edge, size, scale)` draws the 4px raised frame: 2px light + 2px face on
-  the top/left outer edge, face + 2px dark on bottom/right.
+- `renderBorder(edge, size, scale)` draws the 5px frame as a **three-band bevel**: a lit
+  band, the grey face, then a shadowed band. Left is `light(2) face(2) dark(1)`; right
+  and bottom are `light(1) face(2) dark(2)` — the lit band swaps to the inner side. Both
+  this and the title bar's own outer edges go through the single `bevelBands()` painter in
+  `chrome.cpp`, because the bar spans the full window width and the side strips the full
+  window height, so **bar and frame overlap in the corners**; if each drew its own bevel
+  the join would show. `outerIsHigh` selects which end faces away from the client.
+- **Watch the fill() argument order in `bevelBands`.** The horizontal branch is
+  `fill(x, y, len, width)` and the vertical branch is `fill(x, y, width, len)`. Swapping
+  them draws the bottom frame's lit band as a 1px *column*, which silently drops the inner
+  highlight and leaves `face(2) dark(2)`.
 - `desiredExtents` per edge. `SBoxExtents.topLeft` is `{left, top}` and `bottomRight`
   is `{right, bottom}`: TOP `{0, barHeight}`, LEFT `{borderSize, 0}`,
   RIGHT `bottomRight = {borderSize, 0}`, BOTTOM `bottomRight = {0, borderSize}`.
@@ -362,7 +414,8 @@ will not compile against it — check `has_value()` instead.
 
 ## Roadmap
 
-The title bar fidelity increment and the frame are done. Remaining, in order:
+The title bar fidelity increment and the frame are both **done and verified against live
+pixels**. Remaining, in order:
 
 1. **Rule-settable colours** (Part 2 above). Cheap and self-contained — do it next.
 2. **Verify button clicks.** Never exercised — see the hit-testing note in `## Status`.

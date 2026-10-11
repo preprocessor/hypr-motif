@@ -8,27 +8,32 @@
 
 namespace CDE {
 
-    // Measured from example.png (2x-scaled, so image px / 2). See AGENTS.md.
+    // Measured from examples/CDE-7.png, which is 1:1 with no scaling to undo.
+    // Reference for every number here; see AGENTS.md.
     //
-    // Vertical, top-down, for a BAR_HEIGHT of 25:
+    // Vertical, top-down, for a BAR_HEIGHT of 22:
     //   rows 0-1  light   outer top bevel
     //   rows 2-3  face
-    //   row  4    dark    groove under the bevel
-    //   row  5    light
-    //   rows 6-23 face    content lives here
-    //   row  24   dark    bottom edge
+    //   row  4    dark    ┐ groove
+    //   row  5    light   ┘
+    //   rows 6-20 face    fields, glyphs and title live here
+    //   row  21   dark    bottom edge
     //
-    // There is NO white highlight band — what looked like one at a glance is the
-    // title glyphs themselves, which are #ffffff.
-    inline constexpr int BEVEL       = 2; // top bevel thickness
+    // There is NO white highlight band — what looks like one at a glance is the
+    // title text, which is #ffffff.
+    inline constexpr int BAR_HEIGHT   = 22;
+    inline constexpr int BEVEL       = 2; // outer top bevel thickness
     inline constexpr int GROOVE      = 1; // dark+light groove below the bevel
-    inline constexpr int SIDE        = 1; // outer side bevel
-    inline constexpr int FIELD_W     = 18; // width of a button field
-    inline constexpr int RIGHT_MARGIN = 4; // window edge to the outermost separator
+    inline constexpr int SIDE        = 1; // separator is dark+light, this is each
+    inline constexpr int FIELD_W     = 15; // width of a button field
+    inline constexpr int LEFT_SEP     = 4; // first separator, bar-relative
+    inline constexpr int RIGHT_MARGIN = 6; // window edge to the outermost separator
 
-    // Window frame on the left/right/bottom edges. Measured 4px: 2px light + 2px face
-    // on the top/left outer edge, face + 2px dark on bottom/right.
-    inline constexpr int BORDER      = 4;
+    // Window frame. 5px, and it is a three-band bevel, not two: the outer half is lit
+    // and shadowed with a grey face between. Left is lit on its outer side; right and
+    // bottom on their inner side.
+    inline constexpr int BORDER      = 5;
+    inline constexpr int FACE_BAND  = 2; // grey face between the two bevels
 
     enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
 

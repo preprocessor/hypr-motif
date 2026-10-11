@@ -3,10 +3,12 @@
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 
+#include "chrome.hpp"
+
 namespace CDE {
 
     struct SConfig {
-        int        barHeight      = 25;
+        int        barHeight      = CDE::BAR_HEIGHT;
         CHyprColor face           = {0.600, 0.600, 0.600, 1};
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
         CHyprColor dark           = {0.306, 0.306, 0.306, 1};

@@ -36,11 +36,56 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
 
 void CCdeDecoration::onPositioningReply(const SDecorationPositioningReply& reply) {
     m_assigned = reply.assignedGeometry;
+    // Geometry can change without the title, scale or config changing — notably when a
+    // sibling edge is repositioned slightly after we first raster. ensureTextures also
+    // compares the box size, but dropping it here avoids a frame of wrong pixels.
+    m_barTex.reset();
 }
 
 void CCdeDecoration::updateWindow(PHLWINDOW) {
     // Title, class or size may all have changed; the next draw() re-checks cheaply.
     m_barTex.reset();
+}
+
+CBox CCdeDecoration::outerBox() const {
+    auto siblingBox = [&](const char* name) {
+        for (const auto& d : m_window->m_windowDecorations)
+            if (d && d->getDisplayName() == name)
+                return g_pDecorationPositioner->getWindowDecorationBox(d.get());
+        return CBox{};
+    };
+
+    const CBox   own      = g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(this));
+    const CBox   topSib   = siblingBox("CDE");
+    const CBox   botSib   = siblingBox("CDE:bottom");
+    const CBox   leftSib  = siblingBox("CDE:left");
+    const CBox   rightSib = siblingBox("CDE:right");
+
+    // Take the outer span from the side decorations rather than deriving it from `own`.
+    // `own` is NOT the same rectangle for every edge: for the top it is the client box,
+    // but for the left it already starts at the window's outer edge. Re-expanding a
+    // uniform `own.x - BORDER` therefore shifts the side frames a whole border further
+    // out than the client, leaving a gap of bare wallpaper between frame and client.
+    // The reserved boxes are positioned by the compositor, so read them directly.
+    const double winX      = leftSib.w  > 0 ? leftSib.x : own.x;
+    const double winRight  = rightSib.w > 0 ? rightSib.x + rightSib.w : own.x + own.w;
+    const double winY      = topSib.h  > 0 ? topSib.y : own.y;
+    const double winBottom = botSib.h  > 0 ? botSib.y + botSib.h : own.y + own.h;
+    const double winW      = winRight - winX;
+    const double winH      = winBottom - winY;
+
+    switch (m_edge) {
+        // Motif's title bar spans the FULL window width, frame bands included — that is
+        // the whole point of it. Using the client width leaves wallpaper gaps in the
+        // top corners.
+        case DECORATION_EDGE_TOP: return {winX, winY, winW, topSib.h > 0 ? topSib.h : own.h};
+        // The side frames run the FULL height: alongside the bar as well as below it.
+        case DECORATION_EDGE_LEFT: return {winX, winY, CDE::BORDER, winH};
+        case DECORATION_EDGE_RIGHT: return {winX + winW - CDE::BORDER, winY, CDE::BORDER, winH};
+        // Bottom spans the full width, overlapping both corners.
+        case DECORATION_EDGE_BOTTOM: return {winX, winBottom - CDE::BORDER, winW, CDE::BORDER};
+        default: return {};
+    }
 }
 
 void CCdeDecoration::damageEntire() {
@@ -68,18 +113,26 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
 }
 
 void CCdeDecoration::retexture(float scale) {
+    // Raster at exactly the box draw() will use, so the texture and the geometry cannot
+    // drift apart.
+    const CBox box = outerBox();
+
     if (isTop())
-        m_barTex = CDE::renderBar(m_assigned.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize);
+        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize);
     else
-        m_barTex = CDE::renderBorder(m_edge, m_assigned.size(), scale);
+        m_barTex = CDE::renderBorder(m_edge, box.size(), scale);
 
     m_lastTitle  = m_window->m_title;
     m_lastScale  = scale;
+    m_lastSize   = box.size();
     m_generation = CDE::generation();
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
-    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title && m_generation == CDE::generation())
+    // Size is part of the cache key. The four edges are positioned independently and a
+    // sibling can be repositioned after we raster, which would otherwise leave a
+    // stale texture stretched over the new box — e.g. a frame band one pixel thin.
+    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title && m_generation == CDE::generation() && m_lastSize == outerBox().size())
         return;
 
     retexture(scale);
@@ -90,7 +143,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     if (!isTop())
         return true;
 
-    const Vector2D size   = m_assigned.size();
+    const Vector2D size   = outerBox().size(); // match the widened bar the glyphs were drawn into
     const bool     buttons = CDE::config().showButtons;
 
     auto buttonAt = [&](const Vector2D& p) -> int {
@@ -162,25 +215,13 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     if (!m_barTex)
         return;
 
-// Every edge derives from the window's outer box (decorations included) rather
-    // than from the assigned geometry: the positioner anchors each decoration to the
-    // outer window, so translating by the edge point double-offsets, and logicalBox()
-    // does not report the window box at all. The bar spans the full outer width so it
-    // sits over the frame rather than leaving a gap at the top corners.
-    const CBox outer = g_pDecorationPositioner->getBoxWithIncludedDecos(m_window.lock());
-    if (outer.w <= 0 || outer.h <= 0)
+// Positioned from the positioner's answer for this decoration, re-expanded to the
+    // window's outer span. Do NOT use getBoxWithIncludedDecos() here: it already accounts
+    // for the space we ourselves reserved, so slicing it per edge is a feedback loop that
+    // drifts by the border width.
+    CBox global = outerBox();
+    if (!global.w || !global.h)
         return;
-
-    const double barH = CDE::config().barHeight;
-
-    CBox global;
-    switch (m_edge) {
-        case DECORATION_EDGE_TOP: global = {outer.x, outer.y, outer.w, barH}; break;
-        case DECORATION_EDGE_LEFT: global = {outer.x, outer.y + barH, CDE::BORDER, outer.h - barH - CDE::BORDER}; break;
-        case DECORATION_EDGE_RIGHT: global = {outer.x + outer.w - CDE::BORDER, outer.y + barH, CDE::BORDER, outer.h - barH - CDE::BORDER}; break;
-        case DECORATION_EDGE_BOTTOM: global = {outer.x, outer.y + outer.h - CDE::BORDER, outer.w, CDE::BORDER}; break;
-        default: return;
-    }
 
     if (m_window->m_workspace && !m_window->m_pinned)
         global.translate(m_window->m_workspace->m_renderOffset->value());

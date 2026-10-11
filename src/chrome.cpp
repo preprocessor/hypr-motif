@@ -47,17 +47,51 @@ namespace {
         fill(cr, b.x + b.w - CDE::SIDE, b.y, CDE::SIDE, b.h, p.dark);
     }
 
+    // The one and only bevel painter. The title bar spans the full window width and the
+    // side frames run the full height, so bar and frame OVERLAP in the corners — if each
+    // drew its own bevel there the two would meet and the join would show. Both call
+    // this instead, so the frame and the bar's outer bevel are the same bands by
+    // construction.
+    //
+    // A strip is light, then the grey face band, then dark. The dark side is `outer`,
+    // i.e. which end of the strip faces away from the client:
+    //   left   outer=low  -> light(2) face(2) dark(1)
+    //   right  outer=high -> light(1) face(2) dark(2)
+    //   bottom outer=high -> light(1) face(2) dark(2)
+    void bevelBands(cairo_t* cr, double a, double b, double len, bool vertical, bool outerIsHigh, const SPalette& p) {
+        // The lit band is the WIDE one when it faces outward (left) and the NARROW one
+        // when it faces inward (right, bottom); the dark band takes the other width.
+        const double litW   = outerIsHigh ? CDE::SIDE : CDE::BORDER - CDE::FACE_BAND - CDE::SIDE;
+        const double darkW  = CDE::BORDER - CDE::FACE_BAND - litW;
+        const double faceAt = litW;
+        const double darkAt = litW + CDE::FACE_BAND;
+
+        if (vertical) {
+            fill(cr, a, b, litW, len, p.light);
+            fill(cr, a + faceAt, b, CDE::FACE_BAND, len, p.face);
+            fill(cr, a + darkAt, b, darkW, len, p.dark);
+        } else {
+            // Horizontal: `len` runs along x and the band widths along y. Swapping these
+            // draws the lit band as a 1px column, which leaves the bottom frame missing
+            // its inner highlight entirely.
+            fill(cr, a, b, len, litW, p.light);
+            fill(cr, a, b + faceAt, len, CDE::FACE_BAND, p.face);
+            fill(cr, a, b + darkAt, len, darkW, p.dark);
+        }
+    }
+
 } // namespace
 
 namespace CDE {
 
-    // Measured layout: 1px dark + 1px light outer edge, then an 18px left field.
+    // Reference: examples/CDE-7.png. The left field runs from bar-relative x6..x20,
+    // so the separator that closes it sits at x21.
     double leftFieldEnd(Vector2D size) {
-        return SIDE * 2 + FIELD_W;
+        return LEFT_SEP + SIDE * 2 + FIELD_W;
     }
 
-    // Right side has THREE separators: title/right-pair, between the pair, and the
-    // outer right edge. The pair therefore starts RIGHT_MARGIN + 2 units in.
+    // The right side carries three separators — title/fieldA, between the pair, and the
+    // outermost one — at bar-relative x (width-40), (width-23) and (width-6).
     double rightFieldStart(Vector2D size) {
         return size.x - RIGHT_MARGIN - 2 * (FIELD_W + SIDE * 2);
     }
@@ -67,35 +101,40 @@ namespace CDE {
         return {x, 0, std::max(0.0, rightFieldStart(size) - x), size.y};
     }
 
-    // Motif's title-bar glyphs, measured from example.png at BAR_HEIGHT 25.
-    // All three share one centre line — the centre of the field, which is the band
-    // between the groove and the bottom edge (rows 6..23). That is 3px below the
-    // bar's own centre, which is why centring on the bar looks visibly wrong.
-    //   left (window menu)  12 x 4   rows 13-16
-    //   minimize             4 x 4   rows 13-16
-    //   maximize            12 x 12  rows  9-20
+    // Motif's title-bar glyphs, measured from CDE-7.png at BAR_HEIGHT 22. All three are
+    // centred on the *field* (rows 6..20, centre 13.5), not on the bar — centring on the
+    // bar puts every glyph ~1.5px high, which reads as a vertical alignment bug.
+    //   left (window menu)  9 x 4   rows 11-14
+    //   minimize             4 x 4   rows 11-14
+    //   maximize             9 x 9   rows  9-17
     CBox buttonRect(Vector2D size, int btn, bool showButtons) {
         if (!showButtons || btn < 0 || btn >= BTN_COUNT)
             return {};
 
         const double fieldTop = BEVEL + 2 + GROOVE * 2;
-        const double centre   = (fieldTop + size.y - SIDE) / 2;
+        const double fieldH   = size.y - fieldTop - SIDE;
+        const double centre   = fieldTop + fieldH / 2;
 
         double w = 4, h = 4;
         if (btn == BTN_MAX)
-            w = h = 12;
+            w = h = 9;
         else if (btn == BTN_CLOSE)
-            w = 12, h = 4;
+            w = 9, h = 4;
 
-        const double y = centre - h / 2;
-
+        // Each field is FIELD_W wide; the glyph is centred in it.
+        const double fieldW = FIELD_W;
+        double       fieldX;
         if (btn == BTN_CLOSE)
-            return {SIDE * 2 + (FIELD_W - w) / 2, y, w, h};
+            fieldX = LEFT_SEP + SIDE * 2;
+        else if (btn == BTN_MAX)
+            fieldX = rightFieldStart(size) + SIDE * 2 + fieldW + SIDE * 2;
+        else
+            fieldX = rightFieldStart(size) + SIDE * 2;
 
-        // Maximize occupies the rightmost field, minimize the one to its left.
-        const int    k          = btn == BTN_MAX ? 0 : 1;
-        const double fieldRight = size.x - RIGHT_MARGIN - 1 - k * (FIELD_W + SIDE * 2);
-        return {fieldRight - FIELD_W + 1 + (FIELD_W - w) / 2, y, w, h};
+        // Floor the top: centre is x.5 for an odd field height, and handing cairo a
+        // fractional origin makes it blend across two rows instead of hitting the
+        // reference rows exactly.
+        return {fieldX + (fieldW - w) / 2, std::floor(centre - h / 2), w, h};
     }
 
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize) {
@@ -113,15 +152,20 @@ namespace CDE {
         fill(cr, 0, BEVEL + 2, size.x, GROOVE, p.dark);
         fill(cr, 0, BEVEL + 2 + GROOVE, size.x, GROOVE, p.light);
 
-        // Left outer edge, bottom edge, and the field separators.
-        fill(cr, 0, 0, SIDE, size.y, p.dark);
-        fill(cr, SIDE, 0, SIDE, size.y, p.light);
+        // The bar's left and right ends ARE the frame's left and right bevels — the bar
+        // spans the full window width, so these columns are shared with the side frames
+        // and must be painted by the same routine, or the join shows.
+        bevelBands(cr, 0, BEVEL, size.y - BEVEL, true, false, p);                       // left
+        bevelBands(cr, size.x - CDE::BORDER, BEVEL, size.y - BEVEL, true, true, p);     // right
+
+        // Bottom edge of the bar.
         fill(cr, 0, size.y - SIDE, size.x, SIDE, p.dark);
 
         const double lfEnd = leftFieldEnd(size), rfStart = rightFieldStart(size);
-        if (lfEnd < rfStart) {
+        if (LEFT_SEP < rfStart) {
             const double sepTop = BEVEL + 2 + GROOVE * 2;
             const double sepH   = size.y - sepTop - SIDE;
+            separator(cr, LEFT_SEP, sepTop, sepH, p);
             separator(cr, lfEnd, sepTop, sepH, p);
             separator(cr, rfStart, sepTop, sepH, p);
             separator(cr, rfStart + FIELD_W + SIDE * 2, sepTop, sepH, p);
@@ -190,15 +234,14 @@ SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale) {
         cairo_t*         cr   = cairo_create(surf);
         cairo_scale(cr, scale, scale);
 
-        fill(cr, 0, 0, size.x, size.y, p.face);
-
-        // Raised frame: the outer edge of the window gets the highlight (light on the
-        // left/bottom, dark on the right), the inner edge stays face.
-        const double t = BORDER / 2.0;
+// Same painter the title bar uses for its own ends, so the frame and the bar are the
+        // same bands by construction. `outerIsHigh` says which end faces away from the
+        // client: for the left strip that is the low end, for right and bottom the high
+        // end — which is why the lit band swaps sides between them.
         switch (edge) {
-            case DECORATION_EDGE_LEFT: fill(cr, 0, 0, t, size.y, p.light); break;
-            case DECORATION_EDGE_RIGHT: fill(cr, size.x - t, 0, t, size.y, p.dark); break;
-            case DECORATION_EDGE_BOTTOM: fill(cr, 0, size.y - t, size.x, t, p.dark); break;
+            case DECORATION_EDGE_LEFT: bevelBands(cr, 0, 0, size.y, true, false, p); break;
+            case DECORATION_EDGE_RIGHT: bevelBands(cr, 0, 0, size.y, true, true, p); break;
+            case DECORATION_EDGE_BOTTOM: bevelBands(cr, 0, 0, size.x, false, true, p); break;
             default: break;
         }
 

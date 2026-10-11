@@ -25,7 +25,7 @@ namespace {
 namespace CDE {
 
     void registerConfig(HANDLE h) {
-        barHeight   = makeShared<Config::Values::CIntValue>("plugin:cde:bar_height", "Title bar height in logical pixels", 25);
+        barHeight   = makeShared<Config::Values::CIntValue>("plugin:cde:bar_height", "Title bar height in logical pixels", CDE::BAR_HEIGHT);
         face        = makeShared<Config::Values::CColorValue>("plugin:cde:color_face", "Title bar face colour", HEX(0xff999999));
         light       = makeShared<Config::Values::CColorValue>("plugin:cde:color_light", "Bevel highlight colour", HEX(0xffd1d1d1));
         dark        = makeShared<Config::Values::CColorValue>("plugin:cde:color_dark", "Bevel shadow colour", HEX(0xff4e4e4e));
