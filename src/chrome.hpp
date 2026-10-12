@@ -54,8 +54,10 @@ namespace CDE {
     // strip's own width/height is whichever axis is the border thickness.
     SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active);
 
-    // Ordered 8x8 Bayer dither drop shadow, cast on right and bottom edges.
-    SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color);
+    // Ordered 8x8 Bayer dither drop shadow, cast on right and bottom edges. `color` is
+    // the strong inner tone, `color2` the soft outer one; an alpha-0 `color2` collapses
+    // the ramp back to a single tone.
+    SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color, CHyprColor color2);
 
 
     // Logical-px rect of a button's glyph box within the bar, or {} for none/hidden.

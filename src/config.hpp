@@ -34,6 +34,13 @@ namespace CDE {
         bool       shadowEnabled  = true;
         int        shadowRange    = 10;
         CHyprColor shadowColor    = {0.000, 0.000, 0.000, 0.561}; // 0x8f black
+        // Second dither tone: fills the band between `density > t/2` and `density > t`,
+        // adding a tone step to the ramp. Alpha 0 disables it (single-tone behaviour).
+        CHyprColor shadowColor2   = {0.000, 0.000, 0.000, 0.282}; // 0x48 black
+        // Opacity knobs OVERRIDE the two tones' alphas: the colour configs above
+        // contribute RGB only. opacity2 = 0 disables the second tone.
+        double     shadowOpacity1 = 0.5;
+        double     shadowOpacity2 = 0.75;
     };
 
     // Registers every plugin:cde: value. Must be called from pluginInit.

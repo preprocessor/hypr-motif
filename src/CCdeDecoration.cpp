@@ -158,9 +158,14 @@ void CCdeDecoration::retexture(float scale) {
     m_generation  = CDE::generation();
 
     const CBox sh = shadowBox();
-    if (sh.w && sh.h)
-        m_shadowTex = CDE::renderDitherShadow(m_edge, sh.size(), scale, CDE::config().shadowRange, CDE::config().shadowColor);
-    else
+    if (sh.w && sh.h) {
+        // The opacity knobs are the single source of truth for the two tones' alphas;
+        // the colour configs contribute RGB. opacity2 = 0 disables the soft tone.
+        const auto       cfg = CDE::config();
+        const CHyprColor tone1(cfg.shadowColor.r, cfg.shadowColor.g, cfg.shadowColor.b, cfg.shadowOpacity1);
+        const CHyprColor tone2(cfg.shadowColor2.r, cfg.shadowColor2.g, cfg.shadowColor2.b, cfg.shadowOpacity2);
+        m_shadowTex = CDE::renderDitherShadow(m_edge, sh.size(), scale, cfg.shadowRange, tone1, tone2);
+    } else
         m_shadowTex = nullptr;
 }
 

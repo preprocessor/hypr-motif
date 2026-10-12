@@ -318,7 +318,7 @@ namespace CDE {
         { 63, 31, 55, 23, 61, 29, 53, 21 },
     };
 
-    SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color) {
+    SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color, CHyprColor color2) {
         const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
         const double rScaled = shadowRange * scale;
         if (rScaled <= 0)
@@ -333,6 +333,14 @@ namespace CDE {
         const uint8_t cg = sc<uint8_t>(std::clamp(color.g * color.a, 0.0, 1.0) * 255.0);
         const uint8_t cb = sc<uint8_t>(std::clamp(color.b * color.a, 0.0, 1.0) * 255.0);
         const uint32_t dot = (a << 24) | (cr << 16) | (cg << 8) | cb;
+
+        // Second tone, same packing. It fills the band density/2..density so the ramp has
+        // a tone step instead of falling straight from `dot` to nothing.
+        const uint8_t a2 = sc<uint8_t>(std::clamp(color2.a, 0.0, 1.0) * 255.0);
+        const uint8_t cr2 = sc<uint8_t>(std::clamp(color2.r * color2.a, 0.0, 1.0) * 255.0);
+        const uint8_t cg2 = sc<uint8_t>(std::clamp(color2.g * color2.a, 0.0, 1.0) * 255.0);
+        const uint8_t cb2 = sc<uint8_t>(std::clamp(color2.b * color2.a, 0.0, 1.0) * 255.0);
+        const uint32_t dot2 = (a2 << 24) | (cr2 << 16) | (cg2 << 8) | cb2;
 
 
         const bool isBottom = edge == DECORATION_EDGE_BOTTOM;
@@ -378,9 +386,21 @@ namespace CDE {
                     // so column k distributes its values differently from row k (measured:
                     // 75% dots on the bottom vs 50% on the right at 4px out). Bottom walks
                     // rows with y; the right edge must therefore walk rows with x.
+                    //
+                    // Two tones off ONE cell: `density > t` paints the strong colour,
+                    // otherwise `2*density > t` (t in [density, 2*density)) paints the soft
+                    // colour. Both thresholds share the cell, so the second band is the
+                    // exact complement of the first — no second matrix, and the transpose
+                    // rule above still holds for both decisions. The ramp picks up a tone
+                    // step (dot -> dot2 -> nothing) instead of falling straight to zero.
                     const double threshold = isBottom ? (BAYER8[y % 8][x % 8] + 0.5) / 64.0
                                                       : (BAYER8[x % 8][y % 8] + 0.5) / 64.0;
-                    row[x] = (density > threshold) ? dot : 0;
+                    if (density > threshold)
+                        row[x] = dot;
+                    else if (density * 2.0 > threshold)
+                        row[x] = dot2;
+                    else
+                        row[x] = 0;
                 } else {
                     row[x] = 0;
                 }

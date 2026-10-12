@@ -347,6 +347,9 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 | `shadow_enabled` | bool | `true` |
 | `shadow_range` | int | `10` |
 | `shadow_color` | colour | `#000000` |
+| `shadow_color2` | colour | `#000000` |
+| `shadow_opacity1` | float | `0.5` |
+| `shadow_opacity2` | float | `0.75` |
 
 The un-suffixed colours apply to **unfocused** windows; the `_active` ones to the focused
 window. The active face/light/dark are measured from `examples/new-standard.png`.
@@ -596,23 +599,54 @@ The top and left edges stayed correct at 7-8px, so it is specific to the bottom 
 `CHyprDropShadowDecoration.hpp` with no body — nixpkgs ships headers only.
 
 Because we already know the outer box exactly, drawing it ourselves is correct by
-construction and cannot fight the positioner:
+construction and cannot fight the positioner. The shadow is **not** a gradient — it is an
+**ordered dither** with an 8×8 Bayer threshold matrix (`renderDitherShadow()` in
+`chrome.cpp`).
 
-- `shadowStrip()` returns the margin OUTSIDE `outerBox()` for the edge that owns it,
-  **excluding the corners**; `shadowCorner()` hands each corner square to the TOP or BOTTOM
-  edge. The pieces tile the ring without overlapping.
-- `draw()` queues the shadow elements *before* the frame, so the frame paints over any
-  overlap. The boxes are ours to choose — they are not the positioner's.
-- The strips fade along their thin axis only, densest against the window. `nearAtMax` picks
-  the direction: the top and left strips have the window at the maximum coordinate, the
-  bottom and right at zero, so they need **opposite** gradients. Getting that wrong renders
-  the shadow inverted — darkest at the outer edge.
-- A strip fades along one axis only, so a corner left to the strips is painted with a 1D
-  gradient and ends up asymmetric — full strength along one edge of the square, nearly
-  invisible along the other. `renderShadowCorner()` gives each corner square its own
-  **radial** falloff centred on the window's corner, with the fade radius equal to the
-  square's side so it meets both adjacent strips exactly. Verified against grim: the
-  falloff is symmetric along both edges of the square and continuous with the strips.
+### Dithered shadows
+
+Only the RIGHT and BOTTOM edges cast a shadow (the two outer edges of the window ring).
+Each builds one texture, blitted via `CTexPassElement` *before* the frame so the frame
+paints over any bleed:
+
+- Per-pixel distance field `d`: the flat strip uses the thin-axis coordinate; the two
+  corner cells use `hypot()` so the shadow rounds off the window corner.
+- Density is `1 - d/range`, so it is densest against the window and reaches zero at
+  `shadow_range` px out.
+- Threshold is indexed so the **distance axis always drives the Bayer row**: bottom uses
+  `(BAYER8[y % 8][x % 8] + 0.5) / 64.0`, right uses `(BAYER8[x % 8][y % 8] + 0.5) / 64.0`.
+  A pixel is painted when `density > threshold`.
+- **The right edge's index is transposed, and that is load-bearing.** `BAYER8` is not
+  transpose-symmetric (it is only 180°-rotation symmetric), so row k and column k
+  distribute their values differently. With the naive `BAYER8[y % 8][x % 8]` on both
+  edges, the bottom's fade walks the rows while the right's walks the columns, and the two
+  edges fade at different rates at the same offset — measured 75% dots on the bottom vs
+  50% on the right at 4px out (density 0.6), which reads as a lopsided shadow. Transposing
+  the right edge's index makes both edges sample row `d % 8` at distance `d`, so the
+  density ramp and rhythm match exactly. Verified against grim: same-distance scans on
+  both edges now produce identical on-counts.
+- The 8×8 Bayer pattern tiles every 8 pixels, which can read as a visible grid at the
+  default 10px range on 1× scale.
+- **Two tones off one cell.** The dither is not binary: `density > t` paints the strong
+  tone, otherwise `2·density > t` paints the soft tone. Both thresholds read the SAME
+  Bayer cell, so the soft band is the exact complement of the strong one — no second
+  matrix, and the transpose rule above holds for both decisions unchanged. This gives the
+  ramp a tone step (dot → dot2 → nothing) instead of falling straight to zero, which reads
+  as smoother. Measured on the bottom edge at density 0.4: 50% strong + 50% soft + 0%
+  bare, and the right edge produces identical counts at every distance.
+- **`shadow_opacity1` / `shadow_opacity2` are the single source of truth for the two
+  tones' alphas** (0.5 / 0.75 by default); the `shadow_color` / `shadow_color2` configs
+  contribute RGB only, their own alpha is ignored. `shadow_opacity2 = 0` collapses the
+  ramp back to single-tone behaviour.
+- Config: `plugin:cde:shadow_enabled` (bool), `plugin:cde:shadow_range` (1–64 px),
+  `plugin:cde:shadow_color` / `shadow_color2` (RGB of strong / soft tone),
+  `plugin:cde:shadow_opacity1` / `shadow_opacity2` (float 0–1, tone alphas).
+
+**A note on what looks like a bug in a pixel scan.** At density 0.5 the 8×8 Bayer can
+produce long runs (e.g. `SSSS....SSS.SSSS` horizontally, `....SSSSSSSS....` vertically),
+because a single row/column of an 8×8 Bayer is not itself well-distributed. That is
+correct — the *matrix* distributes dots well across the full 8×8 area, but a slice
+is not. Do not "fix" it by randomising per-row.
 
 Untested: whether the shadow smears when a window moves, since the shadow sits outside the
 window's damage region — stale pixels do linger after a drag (observed at a corner after

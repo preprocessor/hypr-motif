@@ -2,6 +2,7 @@
 
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprutils/memory/SharedPtr.hpp>
 
@@ -12,9 +13,10 @@ namespace {
     SP<Config::Values::CIntValue>   barHeight, titleFontSize;
     SP<Config::Values::CColorValue> face, light, dark, highlight, title;
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
-    SP<Config::Values::CColorValue> shadowColor;
+    SP<Config::Values::CColorValue> shadowColor, shadowColor2;
     SP<Config::Values::CBoolValue>  showButtons, shadowEnabled;
     SP<Config::Values::CIntValue>   shadowRange;
+    SP<Config::Values::CFloatValue> shadowOpacity1, shadowOpacity2;
 
     uint64_t g_generation = 0;
 
@@ -44,7 +46,10 @@ namespace CDE {
         titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", 11);
         shadowEnabled = makeShared<Config::Values::CBoolValue>("plugin:cde:shadow_enabled", "Draw a drop shadow around the frame", true);
         shadowRange   = makeShared<Config::Values::CIntValue>("plugin:cde:shadow_range", "Shadow blur range in pixels", 10);
-        shadowColor   = makeShared<Config::Values::CColorValue>("plugin:cde:shadow_color", "Shadow colour (alpha is respected)", HEX(0xff000000));
+        shadowColor   = makeShared<Config::Values::CColorValue>("plugin:cde:shadow_color", "Shadow colour (RGB; alpha overridden by shadow_opacity1)", HEX(0xff000000));
+        shadowColor2  = makeShared<Config::Values::CColorValue>("plugin:cde:shadow_color2", "Second dither tone (RGB; alpha overridden by shadow_opacity2)", HEX(0x48000000));
+        shadowOpacity1 = makeShared<Config::Values::CFloatValue>("plugin:cde:shadow_opacity1", "Opacity of the strong dither tone", 0.5F);
+        shadowOpacity2 = makeShared<Config::Values::CFloatValue>("plugin:cde:shadow_opacity2", "Opacity of the soft dither tone (0 disables it)", 0.75F);
 
         HyprlandAPI::addConfigValueV2(h, barHeight);
         HyprlandAPI::addConfigValueV2(h, face);
@@ -61,6 +66,9 @@ namespace CDE {
         HyprlandAPI::addConfigValueV2(h, shadowEnabled);
         HyprlandAPI::addConfigValueV2(h, shadowRange);
         HyprlandAPI::addConfigValueV2(h, shadowColor);
+        HyprlandAPI::addConfigValueV2(h, shadowColor2);
+        HyprlandAPI::addConfigValueV2(h, shadowOpacity1);
+        HyprlandAPI::addConfigValueV2(h, shadowOpacity2);
     }
 
     SConfig config() {
@@ -96,6 +104,12 @@ namespace CDE {
             c.shadowRange = std::max(1, std::min(64, static_cast<int>(shadowRange->value())));
         if (shadowColor)
             c.shadowColor = CHyprColor(shadowColor->value());
+        if (shadowColor2)
+            c.shadowColor2 = CHyprColor(shadowColor2->value());
+        if (shadowOpacity1)
+            c.shadowOpacity1 = std::clamp(shadowOpacity1->value(), 0.0F, 1.0F);
+        if (shadowOpacity2)
+            c.shadowOpacity2 = std::clamp(shadowOpacity2->value(), 0.0F, 1.0F);
 
         return c;
     }
