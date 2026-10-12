@@ -350,7 +350,8 @@ namespace CDE {
         for (int y = 0; y < h; ++y) {
             uint32_t* row = data + y * stride;
             for (int x = 0; x < w; ++x) {
-                double d = 0.0;
+                double d  = 0.0;
+                int    bx = x; // Bayer column along the edge; the right corner re-anchors it
                 if (isBottom) {
                     if (x < rScaled) {
                         // Bottom-left corner: 45-degree chamfer. Manhattan distance has
@@ -372,6 +373,15 @@ namespace CDE {
                         // starts 1px further out and the junction notches.
                         const double dx = x - winRightScaled - 1.0;
                         d = dx + y;
+                        // Anchor the Bayer column at the CORNER, not the texture origin.
+                        // An absolute column makes these cells sample (outer.w + k) % 8,
+                        // so the chamfer diagonal cuts the lattice at a different phase
+                        // for every window width — the corner's dot pattern and apparent
+                        // density shift on resize and differ between windows. dx is
+                        // corner-local, so the corner renders identically everywhere.
+                        // The left corner needs no such anchoring: its cells start at
+                        // texture x=0, already width-independent.
+                        bx = int(dx) & 7;
                     }
                 } else {
                     // Right edge: x is distance outward from window.
@@ -400,7 +410,7 @@ namespace CDE {
                     // exact complement of the first — no second matrix, and the transpose
                     // rule above still holds for both decisions. The ramp picks up a tone
                     // step (dot -> dot2 -> nothing) instead of falling straight to zero.
-                    const double threshold = isBottom ? (BAYER8[y % 8][x % 8] + 0.5) / 64.0
+                    const double threshold = isBottom ? (BAYER8[y % 8][bx & 7] + 0.5) / 64.0
                                                       : (BAYER8[x % 8][y % 8] + 0.5) / 64.0;
                     if (density > threshold)
                         row[x] = dot;

@@ -609,22 +609,30 @@ Only the RIGHT and BOTTOM edges cast a shadow (the two outer edges of the window
 Each builds one texture, blitted via `CTexPassElement` *before* the frame so the frame
 paints over any bleed:
 
-- Per-pixel distance field `d`: the flat strip uses the thin-axis coordinate. The three
-  corner cells have **deliberately different shapes** (`CORNER_ROUND` in
-  `renderDitherShadow()`):
-  - **Top-right and bottom-left are 45-degree chamfers** — Manhattan distance
-    `dx + dy`, whose iso-lines are exact 45-degree diagonals, so the shadow edge cuts
-    straight across the corner. At the junction column `dx` (or `dy`) is 0, so `d`
-    reduces to the flat strip's value and the two meet without a step.
-  - **Bottom-right is an enlarged quarter-round** — `hypot(dx, dy) / CORNER_ROUND`
-    (2.0), which pushes the zero-density contour from `shadow_range` px out to
-    `shadow_range * CORNER_ROUND` px diagonally, so the arc bulges past the corner
-    further than the flat strips fade and reads as a round corner.
+- Per-pixel distance field `d`: the flat strip uses the thin-axis coordinate; all three
+  corner cells are **45-degree chamfers** — Manhattan distance `dx + dy`, whose iso-lines
+  are exact 45-degree diagonals, so the shadow edge cuts straight across every corner.
+  (An enlarged quarter-round was tried on the bottom-right and rendered broken; all three
+  corners match instead.) Each chamfer's arc centre sits **1px inside the corner region
+  from the flat boundary** (`dx = 0` at the junction column), so `d` reduces to the flat
+  strip's value where they meet — no step. The bottom-right taper originally lacked the
+  `-1.0` and jumped 1px at the junction; all three now share the convention.
 - Density is `1 - d/range`, so it is densest against the window and reaches zero at
   `shadow_range` px out.
 - Threshold is indexed so the **distance axis always drives the Bayer row**: bottom uses
-  `(BAYER8[y % 8][x % 8] + 0.5) / 64.0`, right uses `(BAYER8[x % 8][y % 8] + 0.5) / 64.0`.
+  `(BAYER8[y % 8][bx & 7] + 0.5) / 64.0`, right uses `(BAYER8[x % 8][y % 8] + 0.5) / 64.0`.
   A pixel is painted when `density > threshold`.
+- **The bottom-right corner's Bayer column is anchored at the corner, and that is
+  load-bearing for resize.** An absolute column makes the corner cells sample
+  `(outer.w + k) % 8`, so the chamfer diagonal cuts the lattice at a different phase for
+  every window width — the corner's dot pattern and apparent density shift on resize and
+  differ between windows (verified: the corner block differed for every width tried).
+  `bx = int(dx) & 7` is corner-local, so the corner renders identically everywhere
+  (verified: identical corner blocks at widths 100/101/103/107/250/251/1003). The left
+  corner needs no anchoring — its cells start at texture x=0, already width-independent.
+  Cost: the dither lattice phase-jumps where the corner meets the flat strip; that reads
+  as a subtle rhythm change in a featureless fade, far less visible than a
+  width-dependent corner.
 - **The right edge's index is transposed, and that is load-bearing.** `BAYER8` is not
   transpose-symmetric (it is only 180°-rotation symmetric), so row k and column k
   distribute their values differently. With the naive `BAYER8[y % 8][x % 8]` on both
