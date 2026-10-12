@@ -609,8 +609,17 @@ Only the RIGHT and BOTTOM edges cast a shadow (the two outer edges of the window
 Each builds one texture, blitted via `CTexPassElement` *before* the frame so the frame
 paints over any bleed:
 
-- Per-pixel distance field `d`: the flat strip uses the thin-axis coordinate; the two
-  corner cells use `hypot()` so the shadow rounds off the window corner.
+- Per-pixel distance field `d`: the flat strip uses the thin-axis coordinate. The three
+  corner cells have **deliberately different shapes** (`CORNER_ROUND` in
+  `renderDitherShadow()`):
+  - **Top-right and bottom-left are 45-degree chamfers** — Manhattan distance
+    `dx + dy`, whose iso-lines are exact 45-degree diagonals, so the shadow edge cuts
+    straight across the corner. At the junction column `dx` (or `dy`) is 0, so `d`
+    reduces to the flat strip's value and the two meet without a step.
+  - **Bottom-right is an enlarged quarter-round** — `hypot(dx, dy) / CORNER_ROUND`
+    (2.0), which pushes the zero-density contour from `shadow_range` px out to
+    `shadow_range * CORNER_ROUND` px diagonally, so the arc bulges past the corner
+    further than the flat strips fade and reads as a round corner.
 - Density is `1 - d/range`, so it is densest against the window and reaches zero at
   `shadow_range` px out.
 - Threshold is indexed so the **distance axis always drives the Bayer row**: bottom uses

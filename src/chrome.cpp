@@ -346,6 +346,11 @@ namespace CDE {
         const bool isBottom = edge == DECORATION_EDGE_BOTTOM;
         // For bottom: width includes window plus corner. Window right edge is at w - rScaled.
         const double winRightScaled = std::max(0.0, w - rScaled);
+        // Bottom-right corner only: dividing the radial distance by this pushes the
+        // zero-density contour from rScaled out to rScaled * CORNER_ROUND, so the arc
+        // bulges diagonally past the corner further than the flat strips fade — the
+        // corner reads round. The other two corners are 45-degree chamfers instead.
+        constexpr double CORNER_ROUND = 2.0;
 
         for (int y = 0; y < h; ++y) {
             uint32_t* row = data + y * stride;
@@ -353,26 +358,29 @@ namespace CDE {
                 double d = 0.0;
                 if (isBottom) {
                     if (x < rScaled) {
-                        // Bottom-left corner taper
+                        // Bottom-left corner: 45-degree chamfer. Manhattan distance has
+                        // iso-lines that are exact 45-degree diagonals, so the shadow's
+                        // outer edge cuts straight across the corner. At the junction
+                        // (x = rScaled-1) dx is 0 and d reduces to y — continuous with
+                        // the flat strip.
                         const double dx = rScaled - 1.0 - x;
-                        const double dy = y;
-                        d = std::hypot(dx, dy);
+                        d = dx + y;
                     } else if (x <= winRightScaled) {
                         // Flat bottom strip
                         d = y;
                     } else {
-                        // Bottom-right corner round
+                        // Bottom-right corner: enlarged quarter-round (see CORNER_ROUND).
                         const double dx = x - winRightScaled;
                         const double dy = y;
-                        d = std::hypot(dx, dy);
+                        d = std::hypot(dx, dy) / CORNER_ROUND;
                     }
                 } else {
                     // Right edge: x is distance outward from window.
                     if (y < rScaled) {
-                        // Top-right corner taper
-                        const double dx = x;
+                        // Top-right corner: 45-degree chamfer, same construction as the
+                        // bottom-left — at y = rScaled-1, d reduces to x.
                         const double dy = rScaled - 1.0 - y;
-                        d = std::hypot(dx, dy);
+                        d = x + dy;
                     } else {
                         // Flat right strip
                         d = x;
