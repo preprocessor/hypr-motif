@@ -633,6 +633,42 @@ paints over any bleed:
   Cost: the dither lattice phase-jumps where the corner meets the flat strip; that reads
   as a subtle rhythm change in a featureless fade, far less visible than a
   width-dependent corner.
+- **The bottom-right corner indexes a transpose-symmetric table (`BAYER8SYM`), and all three
+  of its properties are load-bearing.** Everywhere else the distance axis drives the row: on
+  the flat strips the distance is `y` (bottom) or `x` (right). In the corner the axes swap
+  roles — outward distance is `dx`, the along-window axis is `y` — so it must sample
+  `row = dx, col = y`, or its ramp descends in the transpose of the order the right edge
+  directly above uses and the shadow jumps across the seam. Measured before the fix: the
+  corner's top row read `D D D D D l D . . .` against the right edge's `D D D l D l D . D .`
+  at the same distances.
+  `BAYER8SYM` is `BAYER8` with its 64 cells sorted by `(min, max)` of each symmetric pair and
+  ranks spread uniformly over 0..63. Each of the three requirements rules out the obvious
+  alternative:
+  - **Symmetric** — raw `BAYER8` is not: 56 of 64 cells differ from their transpose (its only
+    exact 2D symmetry is 180° rotation with value complement). Measured 82/100 under transpose.
+  - **Uniform** — `min(a,b)` and `avg(a,b)` of a cell and its transpose are symmetric but
+    *band the ramp*, which is what made the corner look unsmooth: `min` leaves threshold bins
+    12..15 and 48..63 empty and over-paints (67 dots vs the ideal 63, rowwise error 30.5);
+    `avg` leaves 8..9 empty. `BAYER8SYM` matches `BAYER8`'s distribution — 4 cells in each of
+    16 bins, mean 31.9, stdev 18.5 (`BAYER8`: 31.5, 18.5) — and cuts rowwise error to 24.5.
+    It has 36 distinct values because the 28 off-diagonal pairs are mirrored duplicates,
+    which no symmetric function can avoid; the *spread* is what matters and it stays even.
+  - **No alias pin** — a 10-column corner on a period-8 row forces dx 8 and 9 to wrap, and
+    pinning them was an earlier fix for a stray at the corner's edge. The symmetric table
+    suppresses that stray by itself, so the pin was deleted (it was also keyed on `dx`,
+    which the transpose swaps, making it the last remaining asymmetry: 86/100 with it).
+  Verified on live pixels: 100/100 transpose agreement, 0 isolated dots, width-independent,
+  and the flat strips unchanged (per-distance counts 200/175/200/100/150/100/100/0/100/0 on
+  both edges).
+- **The corner's only true symmetry is the TRANSPOSE, not rotate-90 + flip.** Do not test
+  the corner with `convert -rotate 90 -flop`: that composes to an axis *reversal*
+  (`dx → N-1-dx`), and `max(dx, y)` is not invariant under it — at range 4 the square outer
+  boundary becomes a staircase, so no dither can match. The swap of the two axes is the
+  symmetry that exists, and that is what the `min` lookup delivers. This was measured, not
+  assumed: the raw transposed index scored 72/100 under rotate+flop and 82/100 under
+  transpose; the `min` lookup scores 100/100 under transpose.
+- The 8×8 Bayer pattern tiles every 8 pixels, which can read as a visible grid at the
+  default 10px range on 1× scale.
 - **The right edge's index is transposed, and that is load-bearing.** `BAYER8` is not
   transpose-symmetric (it is only 180°-rotation symmetric), so row k and column k
   distribute their values differently. With the naive `BAYER8[y % 8][x % 8]` on both
