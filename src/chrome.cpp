@@ -346,11 +346,6 @@ namespace CDE {
         const bool isBottom = edge == DECORATION_EDGE_BOTTOM;
         // For bottom: width includes window plus corner. Window right edge is at w - rScaled.
         const double winRightScaled = std::max(0.0, w - rScaled);
-        // Bottom-right corner only: dividing the radial distance by this pushes the
-        // zero-density contour from rScaled out to rScaled * CORNER_ROUND, so the arc
-        // bulges diagonally past the corner further than the flat strips fade — the
-        // corner reads round. The other two corners are 45-degree chamfers instead.
-        constexpr double CORNER_ROUND = 2.0;
 
         for (int y = 0; y < h; ++y) {
             uint32_t* row = data + y * stride;
@@ -369,10 +364,14 @@ namespace CDE {
                         // Flat bottom strip
                         d = y;
                     } else {
-                        // Bottom-right corner: enlarged quarter-round (see CORNER_ROUND).
-                        const double dx = x - winRightScaled;
-                        const double dy = y;
-                        d = std::hypot(dx, dy) / CORNER_ROUND;
+                        // Bottom-right corner: matching 45-degree chamfer. Same junction
+                        // convention as the other two tapers — the arc centre sits 1px
+                        // inside the corner region (dx = 0 at x = winRightScaled+1), so
+                        // d reduces to y at the junction and the edge meets the flat
+                        // strip without a step. Without the -1.0 the first corner column
+                        // starts 1px further out and the junction notches.
+                        const double dx = x - winRightScaled - 1.0;
+                        d = dx + y;
                     }
                 } else {
                     // Right edge: x is distance outward from window.
