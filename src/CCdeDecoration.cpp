@@ -130,16 +130,20 @@ CBox CCdeDecoration::shadowBox() const {
 
     const double r = cfg.shadowRange;
 
-    // Rigid 3px up-and-right nudge of the whole shadow (see SHADOW_OFF_X/Y). Applied to
-    // the box rather than to the distance field inside renderDitherShadow, so the raster
-    // and its dither phase are unchanged — only where the finished texture lands moves.
-    const int ox = CDE::SHADOW_OFF_X, oy = CDE::SHADOW_OFF_Y;
+    // The box abuts the window exactly, except for the two 45-degree chamfers, which wrap
+    // SHADOW_WRAP px past the corner they turn: the bottom strip extends that far LEFT of
+    // the window and the right strip that far ABOVE it. Do NOT offset the box to move the
+    // shadow: the corner cells in renderDitherShadow take their origin from the box edge,
+    // so any shift slides the corners off the window as well. To close the gap between
+    // frame and shadow, change `innerScaled` in renderDitherShadow instead: it re-bases the
+    // ramp onto the window while leaving every corner origin welded in place.
+    const int wrap = CDE::SHADOW_WRAP;
 
     switch (m_edge) {
         case DECORATION_EDGE_RIGHT:
-            return {outer.x + outer.w + ox, outer.y + oy, r, outer.h};
+            return {outer.x + outer.w, outer.y - wrap, r, outer.h + wrap};
         case DECORATION_EDGE_BOTTOM:
-            return {outer.x + ox, outer.y + outer.h + oy, outer.w + r, r};
+            return {outer.x - wrap, outer.y + outer.h, outer.w + r + wrap, r};
         default:
             return {};
     }

@@ -42,15 +42,12 @@ namespace CDE {
     // confirm a formula against.
     inline constexpr int CORNER_GRAB = 21;
 
-    // Rigid offset applied to the whole dithered shadow when it is blitted: -3 in y (up)
-    // and +3 in x (right). Applied to the shadow BOX, not to the distance field, so the
-    // raster is untouched and every property measured on it — the Bayer phase, the
-    // transpose symmetry, the corner anchoring — carries over verbatim. What it costs:
-    // the bottom edge's shadow slides up under the frame (so its gap closes and its far
-    // end retreats by the same 3px) while the right edge's pulls 3px further out (gap
-    // grows to 6px, far end reaches 3px further). Length is preserved at shadow_range.
-    inline constexpr int SHADOW_OFF_X = -3;
-    inline constexpr int SHADOW_OFF_Y = -3;
+    // How far the two 45-degree chamfers wrap PAST the window corner: the bottom edge's
+    // texture starts this many px left of the window, the right edge's this many px above
+    // it. The chamfer formula is shifted by the same amount (see renderDitherShadow), so
+    // the fade keeps its shape instead of being truncated at the box edge — growing the box
+    // alone would only add blank columns, because the extra distance would be >= the gate.
+    inline constexpr int SHADOW_WRAP = 4;
 
     enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
 

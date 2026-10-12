@@ -619,17 +619,24 @@ paints over any bleed:
   `-1.0` and jumped 1px at the junction; all three now share the convention.
 - Density is `1 - d/range`, so it is densest against the window and reaches zero at
   `shadow_range` px out.
-- **The innermost 3 rows are trimmed: the shadow starts 3px out from the window.** The gate
-  is `d >= 3*scale && d < rScaled` in `renderDitherShadow()`, so the band nearest the frame
-  is left unpainted on every edge. The distance field itself is NOT altered — only where the
-  ramp begins — so every row beyond the trim renders exactly as it did before. `innerScaled`
-  is scaled with the rest so the gap is 3 logical px at any monitor scale.
-  In the 90° bottom-right corner this trims each axis independently (its distance is
-  `max(dx, y)`), so columns dx 0..2 stay blank until ty 3 while dx≥3 paint from ty 0 — an
-  L-shaped notch hugging the window, which is the correct result for that geometry. Verified
-  against grim: the corner holds 100/100 transpose agreement and 0 isolated dots through the
-  trim, and both flat strips still report identical per-distance counts, with the leading
-  zeros being the trim.
+- **The gap between frame and shadow is `innerScaled`, and it is a PULL-IN of the ramp, not
+  a gap.** `d` is always measured from the **window edge**, and the gate is
+  `d < rScaled - innerScaled` with `density = 1 - (d + innerScaled) / rScaled`. So the band
+  starts flush against the frame at `d = 0` and runs `r - inner` px, while the falloff curve
+  is sampled as though it had begun `inner` px further out. `innerScaled` is scaled with the
+  rest, so it is 3 logical px at any monitor scale.
+  This is the correct way to move the shadow. **Do NOT offset the shadow *box* in
+  `shadowBox()` to reposition it** (this was tried, via `SHADOW_OFF_X/Y`, and reverted).
+  Every corner cell takes its origin from the box edge — the bottom-right corner's `dx`
+  comes from `winRightScaled = w - rScaled` — so any box shift slides the corners off the
+  window too. Worse, the bottom texture is only `r` px wider than the window, so a shift
+  also truncates the far end of the corner: a `-3` x-offset put the 90° corner's `dx = 0`
+  origin 3px *inside* the frame and cut its outer 3 columns, while the 45° bottom-left
+  chamfer detached from the window's left edge entirely. Anchoring `d` to the window keeps
+  all three ends welded to the frame for any `inner`. Verified against grim with
+  `inner = 3`, `r = 16`: the bottom-left chamfer is a clean 45° diagonal starting on the
+  window's bottom-left corner, the bottom-right corner is a 13×13 square on the window
+  corner holding 169/169 transpose agreement, and both flat strips start at `d = 0`.
 - Threshold is indexed so the **distance axis always drives the Bayer row**: bottom uses
   `(BAYER8[y % 8][bx & 7] + 0.5) / 64.0`, right uses `(BAYER8[x % 8][y % 8] + 0.5) / 64.0`.
   A pixel is painted when `density > threshold`.
@@ -706,6 +713,15 @@ paints over any bleed:
   tones' alphas** (0.5 / 0.75 by default); the `shadow_color` / `shadow_color2` configs
   contribute RGB only, their own alpha is ignored. `shadow_opacity2 = 0` collapses the
   ramp back to single-tone behaviour.
+- **`SHADOW_WRAP` (4px) extends only the two 45° chamfers.** The bottom edge's texture
+  starts 4px left of the window and the right edge's 4px above it, so the dither reaches
+  that far further around the bottom-left and top-right corners. The chamfer *formula* must
+  NOT be shifted to match — growing the box already slides the whole texture, so shifting
+  the formula as well compounds the two and gives 7px, not 4px (measured). The other two
+  ends are unaffected: the bottom-right 90° corner's `winRightScaled = w - rScaled` stays
+  on the window's right edge because the extra width is added on the left, and there is no
+  chamfer on the remaining edges. Verified by porting the formulas: the leftmost painted
+  column (bottom) and topmost painted row (right) both shift by exactly −4 at every d.
 - Config: `plugin:cde:shadow_enabled` (bool), `plugin:cde:shadow_range` (1–64 px),
   `plugin:cde:shadow_color` / `shadow_color2` (RGB of strong / soft tone),
   `plugin:cde:shadow_opacity1` / `shadow_opacity2` (float 0–1, tone alphas).

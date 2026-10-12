@@ -348,11 +348,13 @@ namespace CDE {
     SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color, CHyprColor color2) {
         const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
         const double rScaled = shadowRange * scale;
-        // Logical rows nearest the window that are left unpainted: the shadow is pulled 3px
-        // away from the frame (up and left, in the corner's axes) so it renders shorter.
-        // Scaled with the rest, so the gap is 3 logical px at any monitor scale.
+        // Logical rows the ramp is pulled IN by. The band spans d 0..r-inner so the shadow
+        // starts flush against the frame, while its density is sampled as though it began
+        // `inner` px further out — that keeps the falloff shape identical to an offset
+        // shadow instead of re-scaling it. Scaled with the rest, so the pull-in is 3
+        // logical px at any monitor scale.
         const double innerScaled = 3.0 * scale;
-        if (rScaled <= 0)
+        if (rScaled <= innerScaled)
             return nullptr;
 
         cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
@@ -396,6 +398,12 @@ namespace CDE {
                         // outer edge cuts straight across the corner. At the junction
                         // (x = rScaled-1) dx is 0 and d reduces to y — continuous with
                         // the flat strip.
+                        //
+                        // SHADOW_WRAP needs NO shift here. shadowBox() starts the bottom
+                        // box SHADOW_WRAP px left of the window, which slides the whole
+                        // texture — chamfer and flat strip alike — that far left, so the
+                        // dither reaches SHADOW_WRAP px further past the corner. Shifting
+                        // the formula as well would compound the two.
                         const double dx = rScaled - 1.0 - x;
                         d = dx + y;
                     } else if (x < winRightScaled) {
@@ -423,7 +431,9 @@ namespace CDE {
                     // Right edge: x is distance outward from window.
                     if (y < rScaled) {
                         // Top-right corner: 45-degree chamfer, same construction as the
-                        // bottom-left — at y = rScaled-1, d reduces to x.
+                        // bottom-left — at y = rScaled-1, d reduces to x. shadowBox() starts
+                        // the right box SHADOW_WRAP px above the window, which is what makes
+                        // it reach that far past the corner; no shift here.
                         const double dy = rScaled - 1.0 - y;
                         d = x + dy;
                     } else {
@@ -432,12 +442,12 @@ namespace CDE {
                     }
                 }
 
-                // The first 3 logical distance rows are dropped: the shadow starts that far
-                // out from the window and the band nearest the frame is left unpainted. The
-                // distance field is NOT altered, so every row beyond the trim still renders
-                // exactly as before — this only moves where the ramp begins.
-                if (d >= innerScaled && d < rScaled) {
-                    const double density = 1.0 - (d / rScaled);
+                // The ramp starts at d = 0 — flush against the frame — and the density is
+                // sampled at d + inner, so the falloff is the same curve an offset shadow
+                // would have produced, just re-based onto the window. Painting starts at
+                // d = 0 and stops at d = r - inner, so the band is (r - inner) px long.
+                if (d < rScaled - innerScaled) {
+                    const double density = 1.0 - ((d + innerScaled) / rScaled);
                     // The distance axis must always drive the Bayer ROW, or the two edges
                     // fade differently at the same offset: BAYER8 is not transpose-symmetric,
                     // so column k distributes its values differently from row k (measured:
