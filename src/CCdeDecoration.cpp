@@ -130,11 +130,16 @@ CBox CCdeDecoration::shadowBox() const {
 
     const double r = cfg.shadowRange;
 
+    // Rigid 3px up-and-right nudge of the whole shadow (see SHADOW_OFF_X/Y). Applied to
+    // the box rather than to the distance field inside renderDitherShadow, so the raster
+    // and its dither phase are unchanged — only where the finished texture lands moves.
+    const int ox = CDE::SHADOW_OFF_X, oy = CDE::SHADOW_OFF_Y;
+
     switch (m_edge) {
         case DECORATION_EDGE_RIGHT:
-            return {outer.x + outer.w, outer.y, r, outer.h};
+            return {outer.x + outer.w + ox, outer.y + oy, r, outer.h};
         case DECORATION_EDGE_BOTTOM:
-            return {outer.x, outer.y + outer.h, outer.w + r, r};
+            return {outer.x + ox, outer.y + outer.h + oy, outer.w + r, r};
         default:
             return {};
     }
