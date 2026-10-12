@@ -619,6 +619,17 @@ paints over any bleed:
   `-1.0` and jumped 1px at the junction; all three now share the convention.
 - Density is `1 - d/range`, so it is densest against the window and reaches zero at
   `shadow_range` px out.
+- **The innermost 3 rows are trimmed: the shadow starts 3px out from the window.** The gate
+  is `d >= 3*scale && d < rScaled` in `renderDitherShadow()`, so the band nearest the frame
+  is left unpainted on every edge. The distance field itself is NOT altered — only where the
+  ramp begins — so every row beyond the trim renders exactly as it did before. `innerScaled`
+  is scaled with the rest so the gap is 3 logical px at any monitor scale.
+  In the 90° bottom-right corner this trims each axis independently (its distance is
+  `max(dx, y)`), so columns dx 0..2 stay blank until ty 3 while dx≥3 paint from ty 0 — an
+  L-shaped notch hugging the window, which is the correct result for that geometry. Verified
+  against grim: the corner holds 100/100 transpose agreement and 0 isolated dots through the
+  trim, and both flat strips still report identical per-distance counts, with the leading
+  zeros being the trim.
 - Threshold is indexed so the **distance axis always drives the Bayer row**: bottom uses
   `(BAYER8[y % 8][bx & 7] + 0.5) / 64.0`, right uses `(BAYER8[x % 8][y % 8] + 0.5) / 64.0`.
   A pixel is painted when `density > threshold`.
@@ -653,10 +664,14 @@ paints over any bleed:
     16 bins, mean 31.9, stdev 18.5 (`BAYER8`: 31.5, 18.5) — and cuts rowwise error to 24.5.
     It has 36 distinct values because the 28 off-diagonal pairs are mirrored duplicates,
     which no symmetric function can avoid; the *spread* is what matters and it stays even.
-  - **No alias pin** — a 10-column corner on a period-8 row forces dx 8 and 9 to wrap, and
-    pinning them was an earlier fix for a stray at the corner's edge. The symmetric table
-    suppresses that stray by itself, so the pin was deleted (it was also keyed on `dx`,
-    which the transpose swaps, making it the last remaining asymmetry: 86/100 with it).
+  - **No alias pin** — the corner is `shadow_range` wide on a period-8 Bayer row. At the
+    default 16 that is exactly two periods, so dx 0..15 map to rows `0..7, 0..7` and there
+    are **no wrapping columns at all** — the alias problem is designed out rather than
+    patched. (At range 10 it did force dx 8 and 9 to wrap, and pinning them was an earlier
+    fix for a stray at the corner's edge. The symmetric table suppresses that stray by
+    itself, so the pin was deleted — it was also keyed on `dx`, which the transpose swaps,
+    making it the last remaining asymmetry: 86/100 with it.) **Keep `shadow_range` a
+    multiple of 8**; a non-multiple reintroduces the wrap.
   Verified on live pixels: 100/100 transpose agreement, 0 isolated dots, width-independent,
   and the flat strips unchanged (per-distance counts 200/175/200/100/150/100/100/0/100/0 on
   both edges).
@@ -668,7 +683,7 @@ paints over any bleed:
   assumed: the raw transposed index scored 72/100 under rotate+flop and 82/100 under
   transpose; the `min` lookup scores 100/100 under transpose.
 - The 8×8 Bayer pattern tiles every 8 pixels, which can read as a visible grid at the
-  default 10px range on 1× scale.
+  default 16px range on 1× scale.
 - **The right edge's index is transposed, and that is load-bearing.** `BAYER8` is not
   transpose-symmetric (it is only 180°-rotation symmetric), so row k and column k
   distribute their values differently. With the naive `BAYER8[y % 8][x % 8]` on both
@@ -679,7 +694,7 @@ paints over any bleed:
   density ramp and rhythm match exactly. Verified against grim: same-distance scans on
   both edges now produce identical on-counts.
 - The 8×8 Bayer pattern tiles every 8 pixels, which can read as a visible grid at the
-  default 10px range on 1× scale.
+  default 16px range on 1× scale.
 - **Two tones off one cell.** The dither is not binary: `density > t` paints the strong
   tone, otherwise `2·density > t` paints the soft tone. Both thresholds read the SAME
   Bayer cell, so the soft band is the exact complement of the strong one — no second

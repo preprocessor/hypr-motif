@@ -348,6 +348,10 @@ namespace CDE {
     SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color, CHyprColor color2) {
         const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
         const double rScaled = shadowRange * scale;
+        // Logical rows nearest the window that are left unpainted: the shadow is pulled 3px
+        // away from the frame (up and left, in the corner's axes) so it renders shorter.
+        // Scaled with the rest, so the gap is 3 logical px at any monitor scale.
+        const double innerScaled = 3.0 * scale;
         if (rScaled <= 0)
             return nullptr;
 
@@ -428,7 +432,11 @@ namespace CDE {
                     }
                 }
 
-                if (d < rScaled) {
+                // The first 3 logical distance rows are dropped: the shadow starts that far
+                // out from the window and the band nearest the frame is left unpainted. The
+                // distance field is NOT altered, so every row beyond the trim still renders
+                // exactly as before — this only moves where the ramp begins.
+                if (d >= innerScaled && d < rScaled) {
                     const double density = 1.0 - (d / rScaled);
                     // The distance axis must always drive the Bayer ROW, or the two edges
                     // fade differently at the same offset: BAYER8 is not transpose-symmetric,
