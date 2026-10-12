@@ -128,22 +128,23 @@ CBox CCdeDecoration::shadowBox() const {
     if (!outer.w || !outer.h)
         return {};
 
-    const double r = cfg.shadowRange;
-
-    // The box abuts the window exactly, except for the two 45-degree chamfers, which wrap
-    // SHADOW_WRAP px past the corner they turn: the bottom strip extends that far LEFT of
-    // the window and the right strip that far ABOVE it. Do NOT offset the box to move the
-    // shadow: the corner cells in renderDitherShadow take their origin from the box edge,
-    // so any shift slides the corners off the window as well. To close the gap between
-    // frame and shadow, change `innerScaled` in renderDitherShadow instead: it re-bases the
-    // ramp onto the window while leaving every corner origin welded in place.
-    const int wrap = CDE::SHADOW_WRAP;
+    // Every corner is 90 degrees, so the texture needs a full `shadow_range` of room on
+    // each side the shadow wraps around: the bottom strip gets one on the LEFT of the
+    // window as well as the right, and the right strip one ABOVE the window. The window
+    // then sits between two r-wide corner squares, and `d` inside them is Chebyshev from
+    // the window corner — so all three ends are squares welded to the window.
+    //
+    // Do NOT offset these boxes to move the shadow: every corner takes its origin from
+    // the box edge, so any shift slides the corners off the window too. To change the gap
+    // between frame and shadow, edit `innerScaled` in renderDitherShadow instead — it
+    // re-bases the ramp onto the window and leaves the corner origins alone.
+    const int r = cfg.shadowRange;
 
     switch (m_edge) {
         case DECORATION_EDGE_RIGHT:
-            return {outer.x + outer.w, outer.y - wrap, r, outer.h + wrap};
+            return {outer.x + outer.w, outer.y - r, r, outer.h + r};
         case DECORATION_EDGE_BOTTOM:
-            return {outer.x - wrap, outer.y + outer.h, outer.w + r + wrap, r};
+            return {outer.x - r, outer.y + outer.h, outer.w + 2 * r, r};
         default:
             return {};
     }

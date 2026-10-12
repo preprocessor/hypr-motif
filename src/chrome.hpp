@@ -42,12 +42,6 @@ namespace CDE {
     // confirm a formula against.
     inline constexpr int CORNER_GRAB = 21;
 
-    // How far the two 45-degree chamfers wrap PAST the window corner: the bottom edge's
-    // texture starts this many px left of the window, the right edge's this many px above
-    // it. The chamfer formula is shifted by the same amount (see renderDitherShadow), so
-    // the fade keeps its shape instead of being truncated at the box edge — growing the box
-    // alone would only add blank columns, because the extra distance would be >= the gate.
-    inline constexpr int SHADOW_WRAP = 4;
 
     enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
 

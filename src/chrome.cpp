@@ -318,33 +318,6 @@ namespace CDE {
         { 63, 31, 55, 23, 61, 29, 53, 21 },
     };
 
-    // BAYER8SYM is the corner's threshold table: BAYER8 with its 64 cells put in
-    // transpose-symmetric order. The bottom-right corner's density is `max(dx, y)`, and
-    // the one symmetry that field has is swapping the two axes — so the corner's dither
-    // must be transpose-symmetric too, which raw BAYER8 is not (56 of 64 cells differ
-    // from their transpose; its only exact 2D symmetry is 180-degree rotation with value
-    // complement). Sorting the 64 cells by (min, max) of each symmetric pair and spreading
-    // ranks uniformly over 0..63 gives a symmetric matrix whose threshold distribution
-    // matches BAYER8's: 4 cells in each of 16 bins, mean 31.9, stdev 18.5 (BAYER8: 31.5,
-    // 18.5). It has 36 distinct values because the 28 off-diagonal pairs are mirrored
-    // duplicates, which is unavoidable for any symmetric function — the spread stays even.
-    //
-    // Symmetrising with `min(a,b)` or `avg(a,b)` of the cell and its transpose also works,
-    // but they bunch the thresholds and band the ramp: `min` leaves bins 12..15 and 48..63
-    // empty and over-paints (67 dots vs the ideal 63), `avg` leaves 8..9 empty. This table
-    // keeps the ramp smooth (61 dots, rowwise error 24.5 vs min's 30.5) and is exactly
-    // transpose-invariant: 100/100 on live pixels, 0 isolated dots, width-independent.
-    static constexpr uint8_t BAYER8SYM[8][8] = {
-        {  0, 33,  9, 49,  3, 37, 13, 53 },
-        { 33, 16, 57, 25, 39, 19, 63, 29 },
-        {  9, 57,  4, 41, 15, 61,  7, 45 },
-        { 49, 25, 41, 20, 55, 31, 47, 23 },
-        {  3, 39, 15, 55,  1, 35, 11, 51 },
-        { 37, 19, 61, 31, 35, 17, 59, 27 },
-        { 13, 63,  7, 47, 11, 59,  5, 43 },
-        { 53, 29, 45, 23, 51, 27, 43, 21 },
-    };
-
     SP<Render::ITexture> renderDitherShadow(uint32_t edge, Vector2D size, float scale, int shadowRange, CHyprColor color, CHyprColor color2) {
         const int w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
         const double rScaled = shadowRange * scale;
@@ -377,68 +350,69 @@ namespace CDE {
 
 
         const bool isBottom = edge == DECORATION_EDGE_BOTTOM;
-        // For bottom: the texture spans the window plus `shadow_range` columns of corner.
-        // The window therefore occupies x 0..w-rScaled-1, so w-rScaled is the FIRST column
-        // OUTSIDE it. The flat strip must stop at that column's predecessor — using
-        // `x <= w - rScaled` here would swallow it, leaving the corner one column short
-        // and putting its dx origin 2px out instead of 1px, which shows as a seam along
-        // the window's right edge.
+        // Every corner is 90 degrees, so the shadow reads as squares: the texture is
+        // `shadow_range` of corner on EACH wrap side, and the window sits between them.
+        // For the bottom that means the window occupies x rScaled .. w-rScaled-1, so
+        // w - rScaled is the FIRST column outside it. The flat strip must stop at that
+        // column's predecessor — using `x <= w - rScaled` would swallow it, leaving the
+        // corner one column short and putting its dx origin 2px out instead of 1px, which
+        // shows as a seam along the window's right edge.
+        const double r2   = rScaled;
         const double winRightScaled = std::max(0.0, w - rScaled);
 
         for (int y = 0; y < h; ++y) {
             uint32_t* row = data + y * stride;
             for (int x = 0; x < w; ++x) {
-                double d      = 0.0;
-                int    bx     = x;  // Bayer column along the edge; the right corner re-anchors it
-                bool   corner = false; // right corner indexes transposed — see below
+                double d   = 0.0;
+                int    bayR = 0; // Bayer ROW — always the outward distance, so the ramp
+                int    bayC = 0; // descends identically across flats and corners.
                 if (isBottom) {
-                    if (x < rScaled) {
-                        // Bottom-left corner: 45-degree chamfer. Manhattan distance has
-                        // iso-lines that are exact 45-degree diagonals, so the shadow's
-                        // outer edge cuts straight across the corner. At the junction
-                        // (x = rScaled-1) dx is 0 and d reduces to y — continuous with
-                        // the flat strip.
-                        //
-                        // SHADOW_WRAP needs NO shift here. shadowBox() starts the bottom
-                        // box SHADOW_WRAP px left of the window, which slides the whole
-                        // texture — chamfer and flat strip alike — that far left, so the
-                        // dither reaches SHADOW_WRAP px further past the corner. Shifting
-                        // the formula as well would compound the two.
-                        const double dx = rScaled - 1.0 - x;
-                        d = dx + y;
+                    if (x < r2) {
+                        // Bottom-left corner, 90 degrees: Chebyshev `max(dx, y)` has
+                        // axis-aligned iso-lines, so the outer boundary is a square corner
+                        // rather than a 45-degree cut. dx reaches 0 at the column just
+                        // inside the window's left edge, where d reduces to y and the corner
+                        // meets the flat strip without a step.
+                        const double dx = r2 - 1.0 - x;
+                        d    = std::max(dx, static_cast<double>(y));
+                        bayR = int(dx);
+                        bayC = y;
                     } else if (x < winRightScaled) {
                         // Flat bottom strip — stops before the first outside column, which
-                        // belongs to the corner.
-                        d = y;
+                        // belongs to the corner. Row is the distance below the window.
+                        d    = y;
+                        bayR = y;
+                        bayC = x;
                     } else {
-                        // Bottom-right corner: 90 degrees. Chebyshev distance
-                        // `max(dx, y)` has axis-aligned iso-lines, so the zero-density
-                        // contour is a square corner rather than a diagonal. dx = 0 at the
-                        // first column outside the window, so d reduces to y at the junction
-                        // and the corner meets the flat strip without a step — no offset
-                        // needed now that the flat strip stops at the window's last column.
-                        const double dx = x - winRightScaled;
-                        d = std::max(dx, static_cast<double>(y));
+                        // Bottom-right corner, 90 degrees, same construction. dx = 0 at the
+                        // first column outside the window.
+                        //
                         // Anchor the Bayer row at the corner, not the texture origin. An
                         // absolute row makes these cells sample (outer.w + k) % 8, so the
                         // corner's dot pattern and apparent density shift on resize and
                         // differ between windows. dx is corner-local, so the corner renders
                         // identically everywhere.
-                        bx = int(dx);
-                        corner = true;
+                        const double dx = x - winRightScaled;
+                        d    = std::max(dx, static_cast<double>(y));
+                        bayR = int(dx);
+                        bayC = y;
                     }
                 } else {
                     // Right edge: x is distance outward from window.
-                    if (y < rScaled) {
-                        // Top-right corner: 45-degree chamfer, same construction as the
-                        // bottom-left — at y = rScaled-1, d reduces to x. shadowBox() starts
-                        // the right box SHADOW_WRAP px above the window, which is what makes
-                        // it reach that far past the corner; no shift here.
-                        const double dy = rScaled - 1.0 - y;
-                        d = x + dy;
+                    if (y < r2) {
+                        // Top-right corner, 90 degrees, same construction again — dy
+                        // reaches 0 at the row just below the window's top edge, where
+                        // d reduces to x. Here the outward axis is vertical, so the corner's
+                        // Bayer column is the outward distance and the row is dy.
+                        const double dy = r2 - 1.0 - y;
+                        d    = std::max(dy, static_cast<double>(x));
+                        bayR = int(dy);
+                        bayC = x;
                     } else {
                         // Flat right strip
-                        d = x;
+                        d    = x;
+                        bayR = x;
+                        bayC = y;
                     }
                 }
 
@@ -448,33 +422,18 @@ namespace CDE {
                 // d = 0 and stops at d = r - inner, so the band is (r - inner) px long.
                 if (d < rScaled - innerScaled) {
                     const double density = 1.0 - ((d + innerScaled) / rScaled);
-                    // The distance axis must always drive the Bayer ROW, or the two edges
-                    // fade differently at the same offset: BAYER8 is not transpose-symmetric,
-                    // so column k distributes its values differently from row k (measured:
-                    // 75% dots on the bottom vs 50% on the right at 4px out). Bottom walks
-                    // rows with y; the right edge must therefore walk rows with x.
+                    // One plain BAYER8, no per-region table. What matters is that the
+                    // OUTWARD DISTANCE always drives the ROW, or the ramp descends in a
+                    // different order in different regions and the shadow jumps at the
+                    // seams. `bayR`/`bayC` are set per region above to guarantee exactly
+                    // that, and because a corner's row is corner-local the corner pattern
+                    // is width-independent.
                     //
                     // Two tones off ONE cell: `density > t` paints the strong colour,
                     // otherwise `2*density > t` (t in [density, 2*density)) paints the soft
                     // colour. Both thresholds share the cell, so the second band is the
-                    // exact complement of the first — no second matrix. The ramp picks up a
-                    // tone step (dot -> dot2 -> nothing) instead of falling straight to zero.
-                    //
-                    // The bottom-right corner is the one cell that indexes a DIFFERENT,
-                    // symmetrised table (BAYER8SYM below). Everywhere else the distance axis
-                    // drives the row: on the flat strips the distance is y (bottom) or x
-                    // (right). In the corner the axes swap roles — outward distance is dx,
-                    // the along-window axis is y — so it must sample row=dx, col=y, or its
-                    // ramp descends in the transpose of the order the right edge directly
-                    // above uses and the shadow jumps across the seam (measured: the corner's
-                    // top row read D D D D D l D . . . against the right edge's
-                    // D D D l D l D . D . at the same distances).
-                    double threshold;
-                    if (corner) {
-                        threshold = (BAYER8SYM[bx & 7][y & 7] + 0.5) / 64.0;
-                    } else
-                        threshold = isBottom ? (BAYER8[y % 8][bx & 7] + 0.5) / 64.0
-                                             : (BAYER8[x % 8][y % 8] + 0.5) / 64.0;
+                    // exact complement of the first — no second matrix.
+                    const double threshold = (BAYER8[bayR & 7][bayC & 7] + 0.5) / 64.0;
                     if (density > threshold)
                         row[x] = dot;
                     else if (density * 2.0 > threshold)
