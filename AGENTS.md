@@ -321,9 +321,9 @@ aliasing rather than lightly-antialiased text.
 Cairo's toy text API antialiases by default, so `renderBar` sets
 `CAIRO_ANTIALIAS_NONE` on the bar's font options (with hinting left on — hinted + aliased
 renders solid stems; unhinted aliased text breaks stems on some faces). The shadow is a
-second `cairo_show_text` of the same string, drawn **first** in `p.dark`, offset by
-`TITLE_SHADOW_DX/DY` (both 1). No blur and no alpha ramp: the reference's shadow pixels are
-as solid as the glyphs'.
+second `cairo_show_text` of the same string, drawn **first** in `color_title_shadow`
+(black), offset by `TITLE_SHADOW_DX/DY` (both 1). No blur and no alpha ramp: the
+reference's shadow pixels are as solid as the glyphs'.
 
 The face is **`TITLE_FONT` = "Chicago"** — the macOS System font as reissued in
 ChicagoFLF (nixpkgs `chicago-font`, installed here), which is the blocky square-cornered
@@ -368,17 +368,26 @@ under `hl.config({ plugin = { cde = { ... } } })`.
 | `color_dark` | colour | `#4e4e4e` |
 | `color_highlight` | colour | `#ffffff` |
 | `show_buttons` | bool | `true` |
-| `color_title` | colour | `#ffffff` |
-| `title_font_size` | int | `13` |
+| `color_title` | colour | `#b0b0b0` |
+| `color_title_shadow` | colour | `#000000` |
+| `title_font_size` | int | `12` |
 | `color_face_active` | colour | `#eda870` |
 | `color_light_active` | colour | `#f7d9c0` |
 | `color_dark_active` | colour | `#7d593b` |
-| `color_title_active` | colour | `#000000` |
+| `color_title_active` | colour | `#ffffff` |
 
 Un-suffixed colours apply to **unfocused** windows, `_active` to the focused one. The
-active face/light/dark are measured from new-standard.png. `color_title_active` defaults
-to black rather than the reference's `#ffffff`, because white on `#eda870` is ~2.9:1 —
-set it to `#ffffff` for reference fidelity.
+active face/light/dark are measured from new-standard.png.
+
+**The focused title is white and the unfocused one grey**, deliberately the opposite of
+CDE-7 (which is white always) and the reverse of an earlier revision here. It makes focus
+readable from the bar alone at a glance without looking at anything else. White on the tan
+`#eda870` active face is only ~2.9:1, so a user keeping that palette may want a lighter
+`color_title_active`; the default follows the request, not the reference.
+
+`color_title_shadow` is a **single** value, not per-window: examples/title.png shows one
+black shadow under both states. It is deliberately NOT the bevel's dark colour — that is
+brown (`#7d593b`) on the tan palette, and a brown shadow on a tan bar reads as a smudge.
 
 Two constraints on implementing these:
 
@@ -466,6 +475,25 @@ the title as two `CTexPassElement`s draws the bar and nothing else — no error,
 just never appears. The compositor culls an element whose region is already covered by an
 opaque one. Draw the title into the bar's Cairo surface instead: one texture, one pass
 element, exact control over where the text lands.
+
+**A title change is invisible to `draw()` on its own — handle it from an event.** This is
+counter-intuitive and cost real time: a title change updates `m_window->m_title`, so
+`draw()`'s cache key misses and `retexture()` builds a new texture… and nothing appears on
+screen. Two compounding reasons, both in the compositor:
+
+1. `CWindow::onUpdateMeta` posts events and calls `updateToplevel()` — it **never damages
+   the decoration box**, so nothing tells the renderer that region went stale.
+2. Hyprland only calls a decoration's `draw()` when that decoration is being repainted, so
+   with no damage `draw()` does not run at all and the cache check never even happens.
+
+Do not try to fix this from inside `draw()`; it cannot run. `main.cpp` listens to
+`Event::bus()->m_events.window.title` and, for each of that window's decorations, calls
+`invalidate()` + `damageBar()`. `damageBar()` also runs at the end of `retexture()`, which
+covers every other source of a fresh texture.
+
+The symptom was "the title only updates when I resize the window, or use the zoom effect" —
+both damage those pixels as a side effect, which is what made it look like a raster bug
+rather than a damage bug.
 
 ## Button input
 

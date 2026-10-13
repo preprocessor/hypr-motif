@@ -14,16 +14,21 @@ namespace CDE {
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
         CHyprColor dark           = {0.306, 0.306, 0.306, 1};
         CHyprColor highlight      = {1.000, 1.000, 1.000, 1};
-        CHyprColor title          = {1.000, 1.000, 1.000, 1};
+        // Unfocused titles are grey so the focused one, which is white, stands out —
+        // focus is then readable from the bar alone at a glance.
+        CHyprColor title          = {0.690, 0.690, 0.690, 1}; // #b0b0b0
+
+        // The title's 1px drop shadow. Black, and deliberately NOT the bevel's dark
+        // colour: that is brown (#7d593b) on the tan active palette, and a brown shadow
+        // on a tan bar reads as a smudge rather than as depth.
+        CHyprColor titleShadow    = {0.000, 0.000, 0.000, 1};
 
         // Active (focused) window. Face/light/dark are measured from
-        // examples/new-standard.png. The title defaults to black rather than the
-        // reference's #ffffff: white on #eda870 is ~2.9:1, which is poor. Set
-        // color_title_active to #ffffff for reference fidelity.
+        // examples/new-standard.png.
         CHyprColor faceActive     = {0.929, 0.659, 0.439, 1};
         CHyprColor lightActive    = {0.969, 0.851, 0.753, 1};
         CHyprColor darkActive     = {0.490, 0.349, 0.231, 1};
-        CHyprColor titleActive    = {0.000, 0.000, 0.000, 1};
+        CHyprColor titleActive    = {1.000, 1.000, 1.000, 1};
 
         bool       showButtons    = true;
         int        titleFontSize  = 12;

@@ -16,21 +16,23 @@ using namespace Hyprutils::Math;
 namespace {
 
     struct SPalette {
-        CHyprColor face, light, dark, title;
+        CHyprColor face, light, dark, title, shadow;
     };
 
     // The active (focused) window gets its own palette; everything else uses the inactive
-    // one. Both sets are configurable, so nothing here is hardcoded.
+    // one. Both sets are configurable, so nothing here is hardcoded. The shadow is NOT
+    // per-window: examples/title.png shows one black shadow under both, so a single
+    // colour serves both palettes.
     SPalette currentPalette(bool active) {
         const auto c = CDE::config();
-        return {active ? c.faceActive : c.face, active ? c.lightActive : c.light, active ? c.darkActive : c.dark, active ? c.titleActive : c.title};
+        return {active ? c.faceActive : c.face, active ? c.lightActive : c.light, active ? c.darkActive : c.dark, active ? c.titleActive : c.title, c.titleShadow};
     }
 
-    // Swap light and dark, keep face and title. This is what makes a button read as
-    // INSET: the lit edge moves to the bottom/right, which is the opposite of raised.
+    // Swap light and dark, keep face, title and shadow. This is what makes a button read
+    // as INSET: the lit edge moves to the bottom/right, which is the opposite of raised.
     // Motif does this for the held state, and hover borrows the same treatment.
     SPalette inverted(const SPalette& p) {
-        return {p.face, p.dark, p.light, p.title};
+        return {p.face, p.dark, p.light, p.title, p.shadow};
     }
 
     void fill(cairo_t* cr, double x, double y, double w, double h, const CHyprColor& c) {
@@ -393,11 +395,11 @@ namespace CDE {
             const double ty = std::floor(fieldCentre + (fe.ascent - fe.descent) / 2);
 
             // Simple hard shadow, measured off examples/title.png: a second copy of the
-            // same string offset ONE pixel down and right, in the bevel's dark colour.
-            // No blur, no alpha ramp — the reference's shadow pixels are as solid as the
-            // glyph's. Drawn first so the text sits on top of it.
+            // same string offset ONE pixel down and right, in black. No blur, no alpha
+            // ramp — the reference's shadow pixels are as solid as the glyph's. Drawn
+            // first so the text sits on top of it.
             cairo_move_to(cr, tx + TITLE_SHADOW_DX, ty + TITLE_SHADOW_DY);
-            cairo_set_source_rgb(cr, p.dark.r, p.dark.g, p.dark.b);
+            cairo_set_source_rgb(cr, p.shadow.r, p.shadow.g, p.shadow.b);
             cairo_show_text(cr, title.c_str());
 
             cairo_move_to(cr, tx, ty);
