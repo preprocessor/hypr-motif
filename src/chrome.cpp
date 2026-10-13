@@ -345,8 +345,27 @@ namespace CDE {
         if (!title.empty() && fontSize > 0) {
             const CBox field = titleField(size);
 
-            cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+            // "Chicago" is the macOS System font as reissued in ChicagoFLF (nixpkgs
+            // `chicago-font`) — the blocky, square-cornered face in examples/title.png.
+            // The toy API takes one family with no fallback chain, so this relies on
+            // fontconfig resolving it (it is installed here); if it ever is not, Cairo
+            // silently substitutes a default face rather than failing.
+            cairo_select_font_face(cr, TITLE_FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
             cairo_set_font_size(cr, fontSize);
+
+            // Aliased, per examples/title.png: the reference has NO intermediate
+            // colours anywhere — every glyph pixel is either fully text or fully
+            // background, so cairo's default greyscale antialiasing is wrong here.
+            // Hinting stays on (the default) so stems snap to the pixel grid; without it
+            // hinted-and-aliased text renders with visibly broken stems on some faces.
+            static cairo_font_options_t* fontOpts = [] {
+                cairo_font_options_t* o = cairo_font_options_create();
+                cairo_font_options_set_antialias(o, CAIRO_ANTIALIAS_NONE);
+                cairo_font_options_set_hint_style(o, CAIRO_HINT_STYLE_FULL);
+                cairo_font_options_set_hint_metrics(o, CAIRO_HINT_METRICS_ON);
+                return o;
+            }();
+            cairo_set_font_options(cr, fontOpts);
 
             cairo_text_extents_t ext;
             cairo_text_extents(cr, title.c_str(), &ext);
@@ -358,11 +377,31 @@ namespace CDE {
                 cairo_text_extents(cr, title.c_str(), &ext);
             }
 
-            const double tx = field.x + (field.w - ext.width) / 2 - ext.x_bearing;
-            const double ty = (size.y + ext.height) / 2;
+            // Centre on the FIELD (rows 6..20), not on the bar — the same band the button glyphs
+            // centre on — and do it with the font's own ascent/descent rather than the
+            // string's ink height, which shifts with the glyphs present. Baseline = centre
+            // + (ascent - descent)/2 puts the middle of the ascent..descent box on it.
+            cairo_font_extents_t fe;
+            cairo_font_extents(cr, &fe);
+            const double fieldTop    = BEVEL + 2 + GROOVE * 2;
+            const double fieldCentre = fieldTop + (size.y - fieldTop - SIDE) / 2;
 
-            cairo_set_source_rgb(cr, p.title.r, p.title.g, p.title.b);
+            // FLOOR both axes. With ANTIALIAS_NONE cairo rounds each glyph to whole
+            // pixels independently, so a fractional origin spaces the stems unevenly —
+            // and with the 1px shadow underneath, that reads as text drawn twice.
+            const double tx = std::floor(field.x + (field.w - ext.width) / 2 - ext.x_bearing);
+            const double ty = std::floor(fieldCentre + (fe.ascent - fe.descent) / 2);
+
+            // Simple hard shadow, measured off examples/title.png: a second copy of the
+            // same string offset ONE pixel down and right, in the bevel's dark colour.
+            // No blur, no alpha ramp — the reference's shadow pixels are as solid as the
+            // glyph's. Drawn first so the text sits on top of it.
+            cairo_move_to(cr, tx + TITLE_SHADOW_DX, ty + TITLE_SHADOW_DY);
+            cairo_set_source_rgb(cr, p.dark.r, p.dark.g, p.dark.b);
+            cairo_show_text(cr, title.c_str());
+
             cairo_move_to(cr, tx, ty);
+            cairo_set_source_rgb(cr, p.title.r, p.title.g, p.title.b);
             cairo_show_text(cr, title.c_str());
         }
 

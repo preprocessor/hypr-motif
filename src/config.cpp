@@ -40,7 +40,7 @@ namespace CDE {
         darkActive   = makeShared<Config::Values::CColorValue>("plugin:cde:color_dark_active", "Bevel shadow colour (active window)", HEX(0xff7d593b));
         titleActive  = makeShared<Config::Values::CColorValue>("plugin:cde:color_title_active", "Title text colour (active window)", HEX(0xff000000));
         showButtons = makeShared<Config::Values::CBoolValue>("plugin:cde:show_buttons", "Whether to draw the title bar buttons", true);
-        titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", 11);
+        titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", 12);
 
         HyprlandAPI::addConfigValueV2(h, barHeight);
         HyprlandAPI::addConfigValueV2(h, face);

@@ -26,7 +26,7 @@ namespace CDE {
         CHyprColor titleActive    = {0.000, 0.000, 0.000, 1};
 
         bool       showButtons    = true;
-        int        titleFontSize  = 11;
+        int        titleFontSize  = 12;
     };
 
     // Registers every plugin:cde: value. Must be called from pluginInit.

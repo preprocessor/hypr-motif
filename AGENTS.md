@@ -105,6 +105,7 @@ Verified against live pixels, not arithmetic. Renders today:
   marked off by separator rules on all four corners.
 - Fielded layout, five separators at bar-rel 4, 21, `width-40`, `width-23`, `width-6`.
 - Title drawn **into the bar texture** (gotcha 4), centred within the title field.
+  **Aliased, with a hard 1px down-right shadow** — see `## Title text style`.
 - Focused windows use a separate palette — see `## Active-window palette`.
 - **All three buttons act**, verified by real clicks against a live session: close →
   `Actions::closeWindow`, float toggle → `Actions::floatWindow(TOGGLE)`,
@@ -134,8 +135,12 @@ bar). We take its **corner geometry and active palette only**. Note it is **Adam
 interlaced** (`interlace=1`), which the ad-hoc PNG reader in this repo mangles into
 garbage — de-interlace before measuring.
 
-`examples/float-toggle.png` is user-supplied and **outranks CDE-7 for the minimize
+`examples/float-toggle.png` is user-supplied and **outranks CDE-7 for the middle
 button**. It has been revised twice; re-measure rather than trusting this file.
+
+`examples/title.png` is user-supplied and **outranks everything for the title text's
+style**: aliased glyphs plus a hard 1px shadow. CDE-7's title is anti-aliased and
+shadowless, so the two references disagree — follow title.png.
 
 | Element | Hex | Notes |
 |---|---|---|
@@ -305,6 +310,51 @@ like `glyphFrame` does.
 The float toggle is in the field left of maximize. Getting that order backwards is
 invisible in the code and obvious on screen.
 
+## Title text style
+
+`examples/title.png` (65x17) is authoritative for the title's **style**, and it disagrees
+with CDE-7: the glyphs there are **aliased** and carry a **hard shadow**. Measured on that
+image: text `#d8d8d8`, shadow `#101010` offset exactly **(+1, +1)** down and right, and
+only three colours present — no intermediate greys anywhere, so it is true hard-edged
+aliasing rather than lightly-antialiased text.
+
+Cairo's toy text API antialiases by default, so `renderBar` sets
+`CAIRO_ANTIALIAS_NONE` on the bar's font options (with hinting left on — hinted + aliased
+renders solid stems; unhinted aliased text breaks stems on some faces). The shadow is a
+second `cairo_show_text` of the same string, drawn **first** in `p.dark`, offset by
+`TITLE_SHADOW_DX/DY` (both 1). No blur and no alpha ramp: the reference's shadow pixels are
+as solid as the glyphs'.
+
+The face is **`TITLE_FONT` = "Chicago"** — the macOS System font as reissued in
+ChicagoFLF (nixpkgs `chicago-font`, installed here), which is the blocky square-cornered
+face the reference is set in. It was "Sans" before and did not look like the example at
+all. The toy API takes one family with no fallback chain, so this relies on fontconfig
+resolving the name; if Chicago is ever missing, Cairo silently substitutes a default face
+rather than failing.
+
+**The baseline is centred on the FIELD, not the bar, and both axes are floored.**
+`baseline = floor(fieldCentre + (ascent - descent) / 2)`, where `fieldCentre` is the
+centre of rows 6..20 (13.5) — the same band the button glyphs centre on — and the metrics
+come from `cairo_font_extents`, NOT from `ext.height` of the string, which moves with
+whichever glyphs are present. Two bugs lived here:
+
+- `ty = (size.y + ext.height) / 2` centred on the *bar* using the string's ink height, so
+  the title sat ~3px low and dropped into the bottom edge.
+- With `ANTIALIAS_NONE` Cairo rounds **each glyph** to whole pixels independently, so a
+  fractional origin spaces the stems unevenly; with the 1px shadow underneath, that reads
+  as **text drawn twice**. `floor()` both the x origin and the baseline, same rule the
+  button glyphs follow.
+
+**12pt is close to the ceiling for a 22px bar.** Measured: the glyphs occupy bar rows
+7..20 (before descenders push to 21), and the field is rows 6..20 with the bottom edge at
+21. Raising `title_font_size` further, or lowering `bar_height`, will push the text into
+the bottom edge; check the rendered row extent if either changes.
+
+With the dark palette (`color_face #333333`, `color_light #555555`, `color_dark #111111`)
+the rendered bar contains exactly four colours — face, light, dark and the title — which
+is the check to run after touching this code. If greys appear between the glyph edges,
+antialiasing came back.
+
 ## Config options
 
 All namespaced `plugin:cde:`, registered with `addConfigValueV2` in `src/config.cpp`, set
@@ -319,7 +369,7 @@ under `hl.config({ plugin = { cde = { ... } } })`.
 | `color_highlight` | colour | `#ffffff` |
 | `show_buttons` | bool | `true` |
 | `color_title` | colour | `#ffffff` |
-| `title_font_size` | int | `11` |
+| `title_font_size` | int | `13` |
 | `color_face_active` | colour | `#eda870` |
 | `color_light_active` | colour | `#f7d9c0` |
 | `color_dark_active` | colour | `#7d593b` |
@@ -379,6 +429,22 @@ previous, now-deleted inode. Build, `cp` to a new name, load the new path. Verif
 `grep -o "libcde[a-z0-9.-]*\.so" /proc/$(pgrep -f "bin/Hyprland" | head -1)/maps` — it
 shows `(deleted)` when you have been fooled, and more than one `libcde-*.so` means two
 copies are fighting over the same decorations.
+
+**A half-unloaded copy leaves a ZOMBIE that looks alive.** Symptom set, all measured in one
+session: the bar drew **doubled** text, the title **stopped updating**, and
+`hyprctl getoption plugin:cde:*` returned **`no such option` for every value** while
+`plugin list` still showed **1** plugin. That combination is the fingerprint — it is not a
+rendering bug and no amount of raster tweaking will touch it:
+
+- two copies were mapped (`~/.local/share/hyprland/plugins/libcde-X.so` **and**
+  `build/libcde.so`); unloading one removed its config registrations but its decorations
+  kept drawing from the deleted inode, i.e. from an **older build**. So config reads fell
+  back to struct defaults (hence "not updating") and the live pixels were stale code
+  (hence "not centred", "double draw").
+- Recovery: unload **every** mapped path until `plugin list` reports **0**, then load one
+  fresh copy and confirm **both** `plugin list` count == 1 **and** that
+  `hyprctl getoption plugin:cde:color_face` answers. Treat "options missing" as the loudest
+  of the signals, because it is the only one that names the real cause.
 
 - `hyprctl plugin unload` **only works by path**. By handle (or `-1`, or a comma list) it
   prints `plugin not loaded` and is a **no-op** — the handle keeps appearing in

@@ -27,6 +27,16 @@ namespace CDE {
     inline constexpr int SIDE        = 1; // separator is dark+light, this is each
     inline constexpr int FIELD_W     = 15; // width of a button field
     inline constexpr int FLOAT_GLYPH = 9; // float-toggle icon, from examples/float-toggle.png
+
+    // Hard shadow under the title text, from examples/title.png: a copy of the string
+    // offset one pixel down and right, drawn in the bevel's dark colour before the text.
+    // No blur and no alpha ramp — the reference's shadow pixels are as solid as the glyphs.
+    inline constexpr int TITLE_SHADOW_DX = 1;
+    inline constexpr int TITLE_SHADOW_DY = 1;
+
+    // Title face: the macOS System font as reissued in ChicagoFLF (nixpkgs
+    // `chicago-font`), which is the blocky face examples/title.png was set in.
+    inline constexpr auto TITLE_FONT = "Chicago";
     inline constexpr int LEFT_SEP     = 4; // first separator, bar-relative
     inline constexpr int RIGHT_MARGIN = 6; // window edge to the outermost separator
 
