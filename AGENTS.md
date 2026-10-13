@@ -438,8 +438,14 @@ dispatcher or action at all** in 0.56.2 — hence the middle button being float,
 
 **Hit-test the FIELD, not the glyph.** `CDE::buttonAt` / `buttonFieldRect` own the
 geometry and the test together, so they cannot drift; the glyph (9x4 on close) is far too
-small a target and made clicks feel spotty. The hover highlight fills the field for the
-same reason.
+small a target and made clicks feel spotty.
+
+**Hover swaps the bevel, it does not wash the background.** A flat highlight fill across
+the field flattens the bevel and reads as a mis-coloured patch sitting *on* the bar rather
+than as part of it. Hover and held both use `inverted(p)` — light and dark exchanged, face
+and title kept — which is what makes the button read as inset. There is no `hover` colour
+in `SPalette` any more. Measured at 1x: hovering changes exactly the field's 176 pixels
+(16x11), the glyph's 1px edges swapping `#555555`/`#111111`.
 
 **Buttons only fire when nothing else consumes the press.** `processMouseDownNormal`
 returns before `checkInputOnDecos(INPUT_TYPE_BUTTON)` if a mouse bind matched the press.

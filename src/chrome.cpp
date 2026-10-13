@@ -16,14 +16,21 @@ using namespace Hyprutils::Math;
 namespace {
 
     struct SPalette {
-        CHyprColor face, light, dark, title, hover;
+        CHyprColor face, light, dark, title;
     };
 
     // The active (focused) window gets its own palette; everything else uses the inactive
     // one. Both sets are configurable, so nothing here is hardcoded.
     SPalette currentPalette(bool active) {
         const auto c = CDE::config();
-        return {active ? c.faceActive : c.face, active ? c.lightActive : c.light, active ? c.darkActive : c.dark, active ? c.titleActive : c.title, CHyprColor{0.72, 0.72, 0.72, 1}};
+        return {active ? c.faceActive : c.face, active ? c.lightActive : c.light, active ? c.darkActive : c.dark, active ? c.titleActive : c.title};
+    }
+
+    // Swap light and dark, keep face and title. This is what makes a button read as
+    // INSET: the lit edge moves to the bottom/right, which is the opposite of raised.
+    // Motif does this for the held state, and hover borrows the same treatment.
+    SPalette inverted(const SPalette& p) {
+        return {p.face, p.dark, p.light, p.title};
     }
 
     void fill(cairo_t* cr, double x, double y, double w, double h, const CHyprColor& c) {
@@ -314,24 +321,21 @@ namespace CDE {
                 if (!r.w)
                     continue;
 
-                // The hover highlight covers the FIELD — the same rect hit-testing uses. Painting the
-                // glyph box instead would light up a 9px sliver of a 15px click target,
-                // which reads as the button flickering in and out of focus.
-                if (hovered == b) {
-                    const CBox f = buttonFieldRect(size, b, true);
-                    fill(cr, f.x, f.y, f.w, f.h, p.hover);
-                }
+                // Hover and held both read as INSET. Motif swaps the bevel when a button
+                // is held — the lit edge moves to the bottom/right, the opposite of
+                // raised — and hover borrows that same swap. It is deliberately NOT a
+                // wash of highlight colour across the field: painting the background
+                // flattens the bevel and reads as a mis-coloured patch sitting on the
+                // bar rather than as part of it. (The held state is not visible in the
+                // reference, so this mirrors the unheld rule rather than confirming it.)
+                const SPalette bp = (hovered == b || pressed == b) ? inverted(p) : p;
 
-                // Motif inverts the bevel when a button is held, so the raised colour
-                // becomes dark. Same painter, colours swapped — the raised edge still
-                // wins the corners. (The held state is not visible in the reference, so
-                // this only mirrors the unheld rule rather than confirming it.)
-                // The float toggle carries its own icon instead of the bare raised
-                // rect; pressed inverts its bevel, mirroring glyphFrame's rule.
+                // The float toggle carries its own icon instead of a bare raised rect,
+                // and takes the same swap.
                 if (b == BTN_FLOAT)
-                    drawFloatToggle(cr, r.x, r.y, pressed == b ? SPalette{p.face, p.dark, p.light, p.title, p.hover} : p);
+                    drawFloatToggle(cr, r.x, r.y, bp);
                 else
-                    glyphFrame(cr, r, pressed == b ? p.dark : p.light, pressed == b ? p.light : p.dark);
+                    glyphFrame(cr, r, bp.light, bp.dark);
 
                 // Motif's other two are bare raised rects; Motif puts no icon in them.
             }
