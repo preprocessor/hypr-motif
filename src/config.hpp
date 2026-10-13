@@ -32,9 +32,6 @@ namespace CDE {
         // derives its box from the window geometry and gets it wrong when a plugin
         // reserves space — the shadow came out ~46px below the frame instead of ~8.
         bool       shadowEnabled  = true;
-        // A multiple of the 8px Bayer period: the bottom-right corner is exactly
-        // shadow_range wide, so it tiles the dither lattice with no alias columns.
-        int        shadowRange    = 16;
         CHyprColor shadowColor    = {0.000, 0.000, 0.000, 0.561}; // 0x8f black
         // Second dither tone: fills the band between `density > t/2` and `density > t`,
         // adding a tone step to the ramp. Alpha 0 disables it (single-tone behaviour).

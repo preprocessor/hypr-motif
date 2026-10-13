@@ -345,7 +345,6 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 | `color_dark_active` | colour | `#7d593b` |
 | `color_title_active` | colour | `#000000` |
 | `shadow_enabled` | bool | `true` |
-| `shadow_range` | int | `10` |
 | `shadow_color` | colour | `#000000` |
 | `shadow_color2` | colour | `#000000` |
 | `shadow_opacity1` | float | `0.5` |
@@ -607,104 +606,43 @@ construction and cannot fight the positioner. The shadow is **not** a gradient �
 
 Only the RIGHT and BOTTOM edges cast a shadow (the two outer edges of the window ring).
 Each builds one texture, blitted via `CTexPassElement` *before* the frame so the frame
-paints over any bleed:
+paints over any bleed. The shadow is **exactly one Bayer tile: 8 logical px, straight down
+and to the right of the window** — the shape a square shadow offset by (8, 8) would cast.
+The two loose ends are **inset by BAYER_N** (right strip starts 8px below the window's top
+edge, bottom strip 8px right of its left edge); there is no wrap-around on the left or
+top, and the extent is fixed by `BAYER_N`, not configurable (`shadow_range` was removed).
 
-- Per-pixel distance field `d`: the flat strip uses the thin-axis coordinate, and **all
-  three corners are 90 degrees** — Chebyshev distance `max(dx, dy)`, whose iso-lines are
-  axis-aligned, so the shadow's outer boundary is a **square** corner. (This replaced an
-  earlier 45-degree treatment: the bottom-left and top-right were Manhattan `dx + dy`
-  chamfers, which cut a diagonal across the corner. The squared-off look is the point —
-  don't reintroduce diagonals.) Each corner's outward axis reaches 0 **1px inside the
-  corner region from the flat boundary**, so `d` reduces to the flat strip's value exactly
-  where they meet — verified continuous at every `d` on both seams.
-- Density is `1 - d/range`, so it is densest against the window and reaches zero at
-  `shadow_range` px out.
-- **The gap between frame and shadow is `innerScaled`, and it is a PULL-IN of the ramp, not
-  a gap.** `d` is always measured from the **window edge**, and the gate is
-  `d < rScaled - innerScaled` with `density = 1 - (d + innerScaled) / rScaled`. So the band
-  starts flush against the frame at `d = 0` and runs `r - inner` px, while the falloff curve
-  is sampled as though it had begun `inner` px further out. `innerScaled` is scaled with the
-  rest, so it is 3 logical px at any monitor scale.
-  This is the correct way to move the shadow. **Do NOT offset the shadow *box* in
-  `shadowBox()` to reposition it** (this was tried, via `SHADOW_OFF_X/Y`, and reverted).
-  Every corner cell takes its origin from the box edge — the bottom-right corner's `dx`
-  comes from `winRightScaled = w - rScaled` — so any box shift slides the corners off the
-  window too. Worse, the bottom texture is only `r` px wider than the window, so a shift
-  also truncates the far end of the corner: a `-3` x-offset put the 90° corner's `dx = 0`
-  origin 3px *inside* the frame and cut its outer 3 columns, while the bottom-left corner
-  detached from the window's left edge entirely. Anchoring `d` to the window keeps all
-  three ends welded to the frame for any `inner`. Verified by porting the formulas with
-  `inner = 3`, `r = 16`: all three corners paint as 13×13 squares hugging the window, the
-  density is continuous at every `d` across both seams, and both flat strips start at
-  `d = 0` with identical per-distance counts.
-- **The outward distance always drives the Bayer ROW.** `bayR`/`bayC` are set per region
-  in `renderDitherShadow`: flat bottom is `row = y` (distance below), flat right is
-  `row = x` (distance outward), the two bottom corners are `row = int(dx)`, and the
-  top-right is `row = int(dy)`. Only then do all regions sample `row = distance`, so the
-  ramp descends identically everywhere. A pixel is painted when `density > threshold`.
-- **A corner's Bayer row is corner-local, and that is load-bearing for resize.** An
-  absolute row makes the corner cells sample `(outer.w + k) % 8`, so the corner cuts the
-  lattice at a different phase for every window width — its dot pattern and apparent density
-  shift on resize and differ between windows. `int(dx)` / `int(dy)` are corner-local, so
-  every corner renders identically everywhere.
-  Cost: the dither lattice phase-jumps where the corner meets the flat strip; that reads
-  as a subtle rhythm change in a featureless fade, far less visible than a
-  width-dependent corner.
-- **The bottom-right corner used to index a separate transpose-symmetric table
-  (`BAYER8SYM`); that is gone.** `BAYER8` alone is now used for every region. The reason
-  for the extra table was that `BAYER8` is not transpose-symmetric (56 of 64 cells differ
-  from their transpose), so a corner — whose axes swap roles — sampled the matrix in the
-  transpose of the order the adjacent strip used and the ramp visibly jumped across the
-  seam. Making every corner 90° removed the need for a *self*-symmetric corner, because the
-  thing that has to match is now the corner against its **neighbouring strip**, not the
-  corner against its own transpose. The cost that remains is that at equal distance the
-  corner and the strip sample *different* Bayer cells (measured: corner `BAYER[0][1]=32`
-  vs strip `BAYER[1][0]=48` at `d=1`), so the dither phase jumps at each seam even though
-  the density `d` is continuous. That is the accepted cost of a plain matrix.
-- **The corner's only true symmetry is the TRANSPOSE, not rotate-90 + flip.** Do not test
-  the corner with `convert -rotate 90 -flop`: that composes to an axis *reversal*
-  (`dx → N-1-dx`), and `max(dx, y)` is not invariant under it — at range 4 the square outer
-  boundary becomes a staircase, so no dither can match. The swap of the two axes is the
-  symmetry that exists, and that is what the `min` lookup delivers. This was measured, not
-  assumed: the raw transposed index scored 72/100 under rotate+flop and 82/100 under
-  transpose; the `min` lookup scores 100/100 under transpose.
-- The 8×8 Bayer pattern tiles every 8 pixels, which can read as a visible grid at the
-  default 16px range on 1× scale.
-- **The right edge's index is transposed, and that is load-bearing.** `BAYER8` is not
-  transpose-symmetric (it is only 180°-rotation symmetric), so row k and column k
-  distribute their values differently. With the naive `BAYER8[y % 8][x % 8]` on both
-  edges, the bottom's fade walks the rows while the right's walks the columns, and the two
-  edges fade at different rates at the same offset — measured 75% dots on the bottom vs
-  50% on the right at 4px out (density 0.6), which reads as a lopsided shadow. Transposing
-  the right edge's index makes both edges sample row `d % 8` at distance `d`, so the
-  density ramp and rhythm match exactly. Verified against grim: same-distance scans on
-  both edges now produce identical on-counts.
-- The 8×8 Bayer pattern tiles every 8 pixels, which can read as a visible grid at the
-  default 16px range on 1× scale.
-- **Two tones off one cell.** The dither is not binary: `density > t` paints the strong
-  tone, otherwise `2·density > t` paints the soft tone. Both thresholds read the SAME
-  Bayer cell, so the soft band is the exact complement of the strong one — no second
-  matrix, and the transpose rule above holds for both decisions unchanged. This gives the
-  ramp a tone step (dot → dot2 → nothing) instead of falling straight to zero, which reads
-  as smoother. Measured on the bottom edge at density 0.4: 50% strong + 50% soft + 0%
-  bare, and the right edge produces identical counts at every distance.
-- **`shadow_opacity1` / `shadow_opacity2` are the single source of truth for the two
-  tones' alphas** (0.5 / 0.75 by default); the `shadow_color` / `shadow_color2` configs
-  contribute RGB only, their own alpha is ignored. `shadow_opacity2 = 0` collapses the
-  ramp back to single-tone behaviour.
-- **The boxes carry a full `shadow_range` of corner on EACH wrap side.** `shadowBox()` gives
-  the bottom strip one on the LEFT of the window as well as on the right, and the right
-  strip one ABOVE the window: `{outer.x - r, ..., outer.w + 2*r, r}` and
-  `{..., outer.y - r, r, outer.h + r}`. The window then sits between two `r`-wide corner
-  squares, and `winRightScaled = w - rScaled` still lands exactly on the window's right
-  edge. A 90° corner needs that much room — with less, the square is truncated on the far
-  axis and the corner reads as a step. (An earlier `SHADOW_WRAP = 4` constant tried to buy
-  the same thing for the 45° chamfers and is gone; it no longer means anything.)
-  Verified by porting the formulas: all three corners paint as clean `r - inner` (13px)
-  squares hugging the window, and both flat strips give identical per-distance counts.
-- Config: `plugin:cde:shadow_enabled` (bool), `plugin:cde:shadow_range` (1–64 px),
-  `plugin:cde:shadow_color` / `shadow_color2` (RGB of strong / soft tone),
-  `plugin:cde:shadow_opacity1` / `shadow_opacity2` (float 0–1, tone alphas).
+- Per-pixel distance `d` is 1-based, in **logical** px: the flat strip uses the thin-axis
+  coordinate; the bottom-right corner is **Chebyshev `max(dx, dy)`**, whose iso-lines are
+  axis-aligned, so the shadow's outer boundary is a **square** corner. Don't reintroduce
+  45-degree chamfers — they cut a diagonal across the corner.
+- The bottom texture owns the corner (`shadowBox()` bottom = `{x+8, y+h, w, 8}`, right =
+  `{x+w, y+8, 8, h-8}`), and the right strip stops at the window's bottom edge, so **no
+  pixel is written by two textures**. The corner is the bottom texture's last `rDev`
+  columns, so `winW = w - rDev` in `renderDitherShadow` needs no knowledge of the inset.
+- Eight fade levels, one per logical px: `level = BAYER_N + 1 - d`. Level 8 (d=1, flush
+  against the frame) is solid; level 1 (d=8) holds only the sparsest dots; `level <= 0`
+  paints nothing.
+- **Two tones off one cell.** `cell < level*8` paints the strong tone, `cell <
+  (level+1)*8` the soft one — the soft band is the next level's strong band, so the ramp
+  reads dot → dot2 → nothing instead of falling straight to zero. `shadow_opacity2 = 0`
+  collapses it back to single-tone (the tone's alpha is 0, so it packs invisible).
+- **The outward distance always drives the Bayer ROW, rotated by one** (`(outward + 1) &
+  7`). The rotation is load-bearing: unrotated, d=8 lands on matrix row 7, whose minimum
+  (21) no level-1 threshold catches, and the band's **last row comes out deterministically
+  blank** — a guaranteed 1px gap at the fringe. Rotated, d=8 samples row 0 (min 0), and
+  every row of the band shows dots. Verified in simulation: per-distance counts descend
+  64/56/48/…/8 strong with 8 soft each from d=2.
+- The corner's Bayer COLUMN is corner-local (`dx` from the window's right edge), so the
+  corner pattern is width-independent — it renders identically on resize and across
+  windows. It phase-jumps where the corner meets the flat strip; accepted, it reads as a
+  subtle rhythm change in a featureless fade.
+- A single row/column of an 8×8 Bayer is not well-distributed, so individual scanlines of
+  the ramp alternate dense/sparse (e.g. `#.#.#.#.` next to a solid row). That is correct
+  ordered dithering, not a bug — do not "fix" it by randomising per-row.
+- Config: `plugin:cde:shadow_enabled` (bool), `plugin:cde:shadow_color` /
+  `shadow_color2` (RGB of strong / soft tone), `plugin:cde:shadow_opacity1` /
+  `shadow_opacity2` (float 0–1, tone alphas).
 
 **A note on what looks like a bug in a pixel scan.** At density 0.5 the 8×8 Bayer can
 produce long runs (e.g. `SSSS....SSS.SSSS` horizontally, `....SSSSSSSS....` vertically),

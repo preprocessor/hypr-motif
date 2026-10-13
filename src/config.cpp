@@ -15,7 +15,6 @@ namespace {
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
     SP<Config::Values::CColorValue> shadowColor, shadowColor2;
     SP<Config::Values::CBoolValue>  showButtons, shadowEnabled;
-    SP<Config::Values::CIntValue>   shadowRange;
     SP<Config::Values::CFloatValue> shadowOpacity1, shadowOpacity2;
 
     uint64_t g_generation = 0;
@@ -45,7 +44,6 @@ namespace CDE {
         showButtons = makeShared<Config::Values::CBoolValue>("plugin:cde:show_buttons", "Whether to draw the title bar buttons", true);
         titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", 11);
         shadowEnabled = makeShared<Config::Values::CBoolValue>("plugin:cde:shadow_enabled", "Draw a drop shadow around the frame", true);
-        shadowRange   = makeShared<Config::Values::CIntValue>("plugin:cde:shadow_range", "Shadow length in pixels (multiple of 8)", 16);
         shadowColor   = makeShared<Config::Values::CColorValue>("plugin:cde:shadow_color", "Shadow colour (RGB; alpha overridden by shadow_opacity1)", HEX(0xff000000));
         shadowColor2  = makeShared<Config::Values::CColorValue>("plugin:cde:shadow_color2", "Second dither tone (RGB; alpha overridden by shadow_opacity2)", HEX(0x48000000));
         shadowOpacity1 = makeShared<Config::Values::CFloatValue>("plugin:cde:shadow_opacity1", "Opacity of the strong dither tone", 0.5F);
@@ -64,7 +62,6 @@ namespace CDE {
         HyprlandAPI::addConfigValueV2(h, showButtons);
         HyprlandAPI::addConfigValueV2(h, titleFontSize);
         HyprlandAPI::addConfigValueV2(h, shadowEnabled);
-        HyprlandAPI::addConfigValueV2(h, shadowRange);
         HyprlandAPI::addConfigValueV2(h, shadowColor);
         HyprlandAPI::addConfigValueV2(h, shadowColor2);
         HyprlandAPI::addConfigValueV2(h, shadowOpacity1);
@@ -100,8 +97,6 @@ namespace CDE {
             c.titleFontSize = std::max(6, static_cast<int>(titleFontSize->value()));
         if (shadowEnabled)
             c.shadowEnabled = shadowEnabled->value();
-        if (shadowRange)
-            c.shadowRange = std::max(8, std::min(64, static_cast<int>(shadowRange->value())));
         if (shadowColor)
             c.shadowColor = CHyprColor(shadowColor->value());
         if (shadowColor2)

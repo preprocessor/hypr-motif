@@ -121,32 +121,23 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
 
 CBox CCdeDecoration::shadowBox() const {
     const auto cfg = CDE::config();
-    if (!cfg.shadowEnabled || cfg.shadowRange <= 0)
+    if (!cfg.shadowEnabled)
         return {};
 
     const CBox outer = outerBox();
     if (!outer.w || !outer.h)
         return {};
 
-    // Every corner is 90 degrees, so the texture needs a full `shadow_range` of room on
-    // each side the shadow wraps around: the bottom strip gets one on the LEFT of the
-    // window as well as the right, and the right strip one ABOVE the window. The window
-    // then sits between two r-wide corner squares, and `d` inside them is Chebyshev from
-    // the window corner — so all three ends are squares welded to the window.
-    //
-    // Do NOT offset these boxes to move the shadow: every corner takes its origin from
-    // the box edge, so any shift slides the corners off the window too. To change the gap
-    // between frame and shadow, edit `innerScaled` in renderDitherShadow instead — it
-    // re-bases the ramp onto the window and leaves the corner origins alone.
-    const int r = cfg.shadowRange;
-
+    // The shadow is exactly one Bayer tile: BAYER_N logical px, straight down and to
+    // the right of the window — the shape a square shadow offset by (8, 8) would cast.
+    // The two loose ends are inset by BAYER_N: the right strip starts 8px below the
+    // window's top edge and the bottom strip 8px right of its left edge. The bottom
+    // texture carries the bottom-right square corner; the right strip stops at the
+    // window's bottom edge, so no pixel is written by two textures.
     switch (m_edge) {
-        case DECORATION_EDGE_RIGHT:
-            return {outer.x + outer.w, outer.y - r, r, outer.h + r};
-        case DECORATION_EDGE_BOTTOM:
-            return {outer.x - r, outer.y + outer.h, outer.w + 2 * r, r};
-        default:
-            return {};
+        case DECORATION_EDGE_RIGHT: return {outer.x + outer.w, outer.y + CDE::BAYER_N, CDE::BAYER_N, outer.h - CDE::BAYER_N};
+        case DECORATION_EDGE_BOTTOM: return {outer.x + CDE::BAYER_N, outer.y + outer.h, outer.w, CDE::BAYER_N};
+        default: return {};
     }
 }
 
@@ -174,7 +165,7 @@ void CCdeDecoration::retexture(float scale) {
         const auto       cfg = CDE::config();
         const CHyprColor tone1(cfg.shadowColor.r, cfg.shadowColor.g, cfg.shadowColor.b, cfg.shadowOpacity1);
         const CHyprColor tone2(cfg.shadowColor2.r, cfg.shadowColor2.g, cfg.shadowColor2.b, cfg.shadowOpacity2);
-        m_shadowTex = CDE::renderDitherShadow(m_edge, sh.size(), scale, cfg.shadowRange, tone1, tone2);
+        m_shadowTex = CDE::renderDitherShadow(m_edge, sh.size(), scale, tone1, tone2);
     } else
         m_shadowTex = nullptr;
 }
