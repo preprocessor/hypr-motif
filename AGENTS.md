@@ -307,20 +307,24 @@ bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 20 | 21
 | Glyph | Size | Bar rows | Notes |
 |---|---|---|---|
 | left (window menu) | 9x4 | 11-14 | we draw close here — a bare raised rect, no X |
-| minimize | 4x4 | 11-14 | bare raised rect, no icon — matches the source exactly |
+| minimize | 7x7 | 10-16 | **float-toggle icon**, user-supplied (`examples/float-toggle.png`) — replaces the 4x4 bare rect CDE-7 shows |
 | maximize | 9x9 | 9-17 | bare raised rect, in the rightmost field |
 
 The field centre is `x.5` because the field is an odd height. **Floor both axes of the
-glyph origin.** The field's own centre is half a pixel on y, and `FIELD_W - w` is odd
-for the 4px minimize glyph, so its x lands on `.5` too. Hand Cairo a fractional origin
+glyph origin.** The field's own centre is half a pixel on y. Hand Cairo a fractional origin
 and it anti-aliases across two rows/columns instead of hitting the reference cells —
-visible as pale half-pixels down one edge of the minimize glyph, and invisible until you
-look for it. Only minimize is affected on x; close and max both divide evenly.
+visible as pale half-pixels down one edge of a glyph, and invisible until you
+look for it.
 
 Centring on the bar instead of the field puts every glyph ~2px high, which is very
 visible against the reference. Motif draws **no icon inside any of the three**; do not
 add one, and in particular do not draw an X — a 9x4 box has no room for one and it
-renders as a dark blob.
+renders as a dark blob. **Exception, deliberate:** the minimize button carries the
+float-toggle icon (two overlapping 5x5 outlined squares, back one offset up-right, front
+interior opaque; encoded as the literal `FLOAT_TOGGLE` pattern in `chrome.cpp`, same
+idiom as the corner mitres). Light on top/left edges, dark on bottom/right; pressed
+inverts the bevel like `glyphFrame` does. `examples/float-toggle.png` outranks CDE-7.png
+for this button.
 
 Minimize is in the field left of maximize. Getting that order backwards is invisible in
 the code and obvious on screen.

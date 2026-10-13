@@ -129,6 +129,32 @@ namespace {
             }
     }
 
+    // The float-toggle glyph for the left button of the right pair, measured from
+    // examples/float-toggle.png (11x11 with a 2px margin, trimmed to the 7x7 core).
+    // Two overlapping 5x5 outlined squares, the back one offset up-right; the front
+    // square's interior is opaque and occludes the back one's bottom-left corner. Light
+    // on top/left edges, dark on bottom/right — the same raised-bevel convention as the
+    // other glyphs. Replaces the bare 4x4 rect Motif puts there; the reference is
+    // user-supplied, so it outranks CDE-7.png for this button.
+    constexpr const char* FLOAT_TOGGLE = "..LLLLL"
+                                         "..L...D"
+                                         "LLLLL.D"
+                                         "L...D.D"
+                                         "L...DDD"
+                                         "L...D.."
+                                         "LDDDD..";
+
+    void drawFloatToggle(cairo_t* cr, double x, double y, const SPalette& p) {
+        for (int r = 0; r < CDE::FLOAT_GLYPH; ++r)
+            for (int c = 0; c < CDE::FLOAT_GLYPH; ++c) {
+                const char ch = FLOAT_TOGGLE[r * CDE::FLOAT_GLYPH + c];
+                if (ch == '.')
+                    continue; // transparent — the bar face shows through
+                const CHyprColor col = ch == 'L' ? p.light : ch == 'D' ? p.dark : p.face;
+                fill(cr, x + c, y + r, 1, 1, col);
+            }
+    }
+
     // A separator marking off the corner grab square. The lit pixel goes on local x=0 in
     // both directions — for the left strip that is the outer edge, for the right strip the
     // inner one, which is what the reference does. On a dark-outer strip the outermost
@@ -186,6 +212,8 @@ namespace CDE {
             w = h = 9;
         else if (btn == BTN_CLOSE)
             w = 9, h = 4;
+        else if (btn == BTN_MIN)
+            w = h = FLOAT_GLYPH;
 
         // Each field is FIELD_W wide; the glyph is centred in it.
         const double fieldW = FIELD_W;
@@ -197,10 +225,10 @@ namespace CDE {
         else
             fieldX = rightFieldStart(size) + SIDE * 2;
 
-        // Floor the origin on both axes: the field centre is x.5 for an odd field height, and
-        // `FIELD_W - w` is odd for the 4px minimize glyph. Handing cairo a fractional
-        // origin makes it blend the glyph across two rows/columns instead of hitting the
-        // reference cells exactly, which shows up as pale half-pixels down one edge.
+        // Floor the origin on both axes: the field centre is x.5 for an odd field height,
+        // and fractional origins make cairo blend across two rows/columns instead of
+        // hitting the reference cells exactly, which shows up as pale half-pixels down
+        // one edge of a glyph.
         return {std::floor(fieldX + (fieldW - w) / 2), std::floor(centre - h / 2), w, h};
     }
 
@@ -269,9 +297,14 @@ namespace CDE {
                 // becomes dark. Same painter, colours swapped — the raised edge still
                 // wins the corners. (The held state is not visible in the reference, so
                 // this only mirrors the unheld rule rather than confirming it.)
-                glyphFrame(cr, r, pressed == b ? p.dark : p.light, pressed == b ? p.light : p.dark);
+                // The float toggle carries its own icon instead of the bare raised
+                // rect; pressed inverts its bevel, mirroring glyphFrame's rule.
+                if (b == BTN_MIN)
+                    drawFloatToggle(cr, r.x, r.y, pressed == b ? SPalette{p.face, p.dark, p.light, p.title, p.hover} : p);
+                else
+                    glyphFrame(cr, r, pressed == b ? p.dark : p.light, pressed == b ? p.light : p.dark);
 
-                // All three are bare raised rects; Motif puts no icon in them.
+                // Motif's other two are bare raised rects; Motif puts no icon in them.
             }
         }
 
