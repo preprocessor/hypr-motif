@@ -26,6 +26,23 @@ compositor keeps the old inode mapped and silently runs stale code.
 `flake.nix` pins `nixpkgs-unstable`, yielding **hyprland 0.56.2**, `aquamarine 0.15.1`,
 `cairo 1.18.4**. Treat those versions as exact.
 
+**Testing clicks.** There is no `xdotool`/`ydotool`/`wlrctl` on this box, and `hyprctl
+dispatch movecursor 37,36` fails under a Lua config (`hl.dispatch(movecursor 37 36)` is a
+Lua syntax error). Two things that do work:
+
+```sh
+grim /tmp/opencode/shot.png        # screenshot, then read pixels with magick
+# real clicks: XTest via ctypes against the 64-bit libXtst in the store
+```
+
+```lua
+-- moving the cursor, the Lua form of the old dispatcher:
+hl.dsp.cursor.move({x=37, y=36})
+```
+
+`SButtonEvent{button, state}` is what `INPUT_TYPE_BUTTON` carries; the release edge is
+how a click is told from a press.
+
 ## ABI constraint — read before touching the build
 
 The compositor `dlopen`s the plugin and passes live C++ objects across the boundary.
@@ -89,21 +106,19 @@ Verified against live pixels, not arithmetic. Renders today:
 - Fielded layout, five separators at bar-rel 4, 21, `width-40`, `width-23`, `width-6`.
 - Title drawn **into the bar texture** (gotcha 4), centred within the title field.
 - Focused windows use a separate palette — see `## Active-window palette`.
+- **All three buttons act**, verified by real clicks against a live session: close →
+  `Actions::closeWindow`, float toggle → `Actions::floatWindow(TOGGLE)`,
+  maximize → `Actions::fullscreenWindow(FSMODE_FULLSCREEN)`. See `## Button input`.
 
 Gaps, in the order they bite:
 
-- **Button hit-testing is unverified.** No way to inject synthetic input here, and
-  `onInputOnDeco`'s `pos` is assumed **decoration-local**. If it is global, nothing ever
-  registers a hit. Check this first: bar decorations in Hyprland subtract
-  `assignedBoxGlobal().pos()` from raw coords, which hints the raw form is global.
 - **No resize handles on the frame edges.** The left/right/bottom decorations swallow no
   input and do nothing; CDE has resize grips in the corners.
 - **`bar_height` changes at runtime are untested** — it feeds `desiredExtents`, so it only
   takes effect once the positioner re-runs (`damageEntire()`). Most likely to need a
   second pass.
 - The active border still double-draws — see `## Known unknown`.
-- The float-toggle icon on the minimize button **still dispatches `minimize`**. The glyph
-  and the action disagree; wiring it to `togglefloating` has been offered, not done.
+- Buttons work only when **no mouse binding consumes the press**. See `## Button input`.
 
 ## References, and how to measure them
 
@@ -267,8 +282,12 @@ bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 20 | 21
 | Glyph | Size | Bar rows | Notes |
 |---|---|---|---|
 | left (window menu) | 9x4 | 11-14 | we draw close here — a bare raised rect, no X |
-| minimize | 9x9 | 9-17 | **float-toggle icon**, user-supplied, replaces CDE-7's 4x4 rect |
+| middle | 9x9 | 9-17 | **float-toggle icon**, user-supplied, replaces CDE-7's 4x4 rect |
 | maximize | 11x11 | 8-18 | bare raised rect; 2px larger than the 9x9 reference, still centred |
+
+The middle button is `BTN_FLOAT`, **not** `BTN_MIN`: it carries a float glyph and toggles
+floating. Renamed from `BTN_MIN` once the action existed, because the old name described a
+minimise button that 0.56.2 does not have.
 
 Centring on the bar instead of the field puts every glyph ~2px high, very visible against
 the reference. **Floor both axes of the glyph origin** — the field centre is half a pixel
@@ -277,14 +296,14 @@ hitting the reference cells, showing as pale half-pixels down one edge.
 
 Motif draws **no icon inside any of the three**; do not add one, and in particular do not
 draw an X — a 9x4 box has no room for one and it renders as a dark blob.
-**Exception, deliberate:** the minimize button carries the float-toggle icon, the literal
+**Exception, deliberate:** the middle button carries the float-toggle icon, the literal
 `FLOAT_TOGGLE` pattern in `chrome.cpp`. Two overlapping 6x6 outlined squares (4x4 hollow),
 back one offset **three** up-right, front interior opaque (`F`) so it occludes the back
 square's bottom-left corner. Light top/left, dark bottom/right; pressed inverts the bevel
 like `glyphFrame` does.
 
-Minimize is in the field left of maximize. Getting that order backwards is invisible in
-the code and obvious on screen.
+The float toggle is in the field left of maximize. Getting that order backwards is
+invisible in the code and obvious on screen.
 
 ## Config options
 
@@ -382,6 +401,52 @@ just never appears. The compositor culls an element whose region is already cove
 opaque one. Draw the title into the bar's Cairo surface instead: one texture, one pass
 element, exact control over where the text lands.
 
+## Button input
+
+Four things about `onInputOnDeco`, all read out of the 0.56.2 source rather than guessed.
+Every one of them was a bug before it was a fact.
+
+**`pos` is GLOBAL, not decoration-local.** `CWindow::checkInputOnDecos` forwards the very
+same coords it just tested with `containsPoint()`; the built-in group bar subtracts its own
+`assignedBoxGlobal().pos()` for exactly this reason. Hit-testing the raw coords against
+bar-relative rects silently never hits anything — which is why no button ever responded
+while this file claimed the code was "assuming decoration-local". Convert with
+`barBoxGlobal()` (the same box `draw()` uses, workspace render offset included).
+
+**`INPUT_TYPE_MOTION` is never sent.** The enum value exists in `SharedDefs.hpp` and
+0.56.2 has **no call site for it** — the header is not documentation. Hover therefore
+cannot arrive as an event: `ensureTextures` polls `g_pInputManager->getMouseCoordsInternal()`
+every frame instead, and that poll is also what stops a press whose release never arrived
+from leaving the glyph stuck in its inverted palette.
+
+**Act on `INPUT_TYPE_BUTTON`'s release, never on `DRAG_END`.** `BUTTON` arrives on press
+*and* release (`processMouseDownNormal`), carrying the event in `data` — read
+`state`/`button` from it or a click cannot be told from a press. `DRAG_END` is a trap: a
+`DRAG_START` we swallow stops Hyprland creating a drag target, and
+`CDragStateController::dragEnd()` early-returns without one, so `DRAG_END` never arrives.
+Keep `DRAG_START` returning true only on the bare bar, so a user-bound `mouse:… movewindow`
+can still drag by the title bar.
+
+**Call `Config::Actions::` directly; do not go through `hyprctl dispatch`.** Under a Lua
+config `hyprctl dispatch <name> <args>` is eval'd as `hl.dispatch(name args)`, which is a
+syntax error for every classic dispatcher name — measured: `hyprctl dispatch exec true` →
+`"')' expected near 'true'"`. The same bug means `invokeHyprctlCommand("dispatch", …)` was
+silently doing nothing here. `Config::Actions::closeWindow(self)` and friends are called
+in-process, take the window explicitly (so a click on an unfocused window's bar acts on
+*that* window), and work under both config backends. Note there is **no `minimize`
+dispatcher or action at all** in 0.56.2 — hence the middle button being float, not minimize.
+
+**Hit-test the FIELD, not the glyph.** `CDE::buttonAt` / `buttonFieldRect` own the
+geometry and the test together, so they cannot drift; the glyph (9x4 on close) is far too
+small a target and made clicks feel spotty. The hover highlight fills the field for the
+same reason.
+
+**Buttons only fire when nothing else consumes the press.** `processMouseDownNormal`
+returns before `checkInputOnDecos(INPUT_TYPE_BUTTON)` if a mouse bind matched the press.
+This session has no mouse binds, so it works here; a user with
+`bindm = …, mouse:272, movewindow` needs `binds:pass_mouse_when_bound = true` or their
+bar buttons go dead.
+
 ## API notes
 
 Verify against the headers before trusting these; the plugin API moves between releases.
@@ -458,10 +523,8 @@ Hyprland's shadow looks wrong, leave it off.
    ```
    Also needs `Event::bus()->m_events.window.updateRules` to invalidate that window, or a
    rule change will not redraw until something else does. Cheap and self-contained.
-2. **Verify button clicks.** Never exercised — see the hit-testing note in `## Status`.
-   The single most valuable unknown left.
-3. Make `bar_height` changes take effect at runtime (needs `damageEntire()` on reload).
-4. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
+2. Make `bar_height` changes take effect at runtime (needs `damageEntire()` on reload).
+3. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
 
 ## Non-goals
 

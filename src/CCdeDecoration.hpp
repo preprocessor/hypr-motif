@@ -64,6 +64,11 @@ class CCdeDecoration : public IHyprWindowDecoration {
         return m_window && Desktop::focusState()->window().get() == m_window.get();
     }
 
+    // Cached raster is only valid while the window is still mapped and placed.
+    bool windowVisible() const {
+        return m_window && m_window->m_isMapped && m_assigned.w && m_assigned.h;
+    }
+
     // The bar is only re-rasterised when the title, scale, focus or button state changes.
     void ensureTextures(float scale);
 

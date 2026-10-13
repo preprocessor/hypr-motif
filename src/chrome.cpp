@@ -202,37 +202,58 @@ namespace CDE {
     //   left (window menu)  9 x 4   rows 11-14
     //   minimize             4 x 4   rows 11-14
     //   maximize             9 x 9   rows  9-17
-    CBox buttonRect(Vector2D size, int btn, bool showButtons) {
+    // The clickable FIELD, not the glyph. The glyph is 9x4..11x11 inside a FIELD_W-wide
+    // field, so hit-testing the glyph alone leaves a few-pixel target and clicks feel
+    // spotty — the user aims at the field, which is what Motif makes clickable.
+    CBox buttonFieldRect(Vector2D size, int btn, bool showButtons) {
         if (!showButtons || btn < 0 || btn >= BTN_COUNT)
             return {};
 
         const double fieldTop = BEVEL + 2 + GROOVE * 2;
         const double fieldH   = size.y - fieldTop - SIDE;
-        const double centre   = fieldTop + fieldH / 2;
+
+        double fieldX;
+        if (btn == BTN_CLOSE)
+            fieldX = LEFT_SEP + SIDE * 2;
+        else if (btn == BTN_MAX)
+            fieldX = rightFieldStart(size) + SIDE * 2 + FIELD_W + SIDE * 2;
+        else
+            fieldX = rightFieldStart(size) + SIDE * 2;
+
+        return {std::floor(fieldX), fieldTop, FIELD_W, fieldH};
+    }
+
+    CBox buttonRect(Vector2D size, int btn, bool showButtons) {
+        const CBox field = buttonFieldRect(size, btn, showButtons);
+        if (!field.w)
+            return {};
+
+        const double centre = field.y + field.h / 2;
 
         double w = 4, h = 4;
         if (btn == BTN_MAX)
             w = h = 11; // 2px larger than the 9x9 reference, still centred
         else if (btn == BTN_CLOSE)
             w = 9, h = 4;
-        else if (btn == BTN_MIN)
+        else if (btn == BTN_FLOAT)
             w = h = FLOAT_GLYPH;
-
-        // Each field is FIELD_W wide; the glyph is centred in it.
-        const double fieldW = FIELD_W;
-        double       fieldX;
-        if (btn == BTN_CLOSE)
-            fieldX = LEFT_SEP + SIDE * 2;
-        else if (btn == BTN_MAX)
-            fieldX = rightFieldStart(size) + SIDE * 2 + fieldW + SIDE * 2;
-        else
-            fieldX = rightFieldStart(size) + SIDE * 2;
 
         // Floor the origin on both axes: the field centre is x.5 for an odd field height,
         // and fractional origins make cairo blend across two rows/columns instead of
         // hitting the reference cells exactly, which shows up as pale half-pixels down
         // one edge of a glyph.
-        return {std::floor(fieldX + (fieldW - w) / 2), std::floor(centre - h / 2), w, h};
+        return {std::floor(field.x + (field.w - w) / 2), std::floor(centre - h / 2), w, h};
+    }
+
+    // Which button, if any, is under a bar-local point. Lives next to the geometry that
+    // defines the fields so hit-testing and drawing cannot drift apart.
+    int buttonAt(Vector2D size, const Vector2D& p, bool showButtons) {
+        for (int b = 0; b < BTN_COUNT; ++b) {
+            const CBox f = buttonFieldRect(size, b, showButtons);
+            if (f.w && p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h)
+                return b;
+        }
+        return BTN_NONE;
     }
 
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active) {
@@ -293,8 +314,13 @@ namespace CDE {
                 if (!r.w)
                     continue;
 
-                if (hovered == b)
-                    fill(cr, r.x - 1, r.y - 1, r.w + 2, r.h + 2, p.hover);
+                // The hover highlight covers the FIELD — the same rect hit-testing uses. Painting the
+                // glyph box instead would light up a 9px sliver of a 15px click target,
+                // which reads as the button flickering in and out of focus.
+                if (hovered == b) {
+                    const CBox f = buttonFieldRect(size, b, true);
+                    fill(cr, f.x, f.y, f.w, f.h, p.hover);
+                }
 
                 // Motif inverts the bevel when a button is held, so the raised colour
                 // becomes dark. Same painter, colours swapped — the raised edge still
@@ -302,7 +328,7 @@ namespace CDE {
                 // this only mirrors the unheld rule rather than confirming it.)
                 // The float toggle carries its own icon instead of the bare raised
                 // rect; pressed inverts its bevel, mirroring glyphFrame's rule.
-                if (b == BTN_MIN)
+                if (b == BTN_FLOAT)
                     drawFloatToggle(cr, r.x, r.y, pressed == b ? SPalette{p.face, p.dark, p.light, p.title, p.hover} : p);
                 else
                     glyphFrame(cr, r, pressed == b ? p.dark : p.light, pressed == b ? p.light : p.dark);

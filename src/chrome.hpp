@@ -44,7 +44,10 @@ namespace CDE {
     inline constexpr int CORNER_GRAB = 21;
 
 
-    enum eButton : int { BTN_CLOSE = 0, BTN_MIN, BTN_MAX, BTN_COUNT, BTN_NONE };
+    // Named for what they DO, not for Motif's usual role: the middle button carries a
+    // float-toggle glyph (examples/float-toggle.png) and toggles floating, not minimize.
+    // Motif's window-menu slot is where we put close, to keep the 1-left/2-right shape.
+    enum eButton : int { BTN_CLOSE = 0, BTN_FLOAT, BTN_MAX, BTN_COUNT, BTN_NONE };
 
     // One texture holds the whole bar, title text included. Drawing the title into
     // the same Cairo surface avoids queueing a second pass element, which the
@@ -59,6 +62,14 @@ namespace CDE {
 
     // Logical-px rect of a button's glyph box within the bar, or {} for none/hidden.
     CBox buttonRect(Vector2D size, int btn, bool showButtons);
+
+    // The clickable FIELD around that glyph — what hit-testing uses, and the hover
+    // highlight. Aiming at the glyph alone is a 9x4px target on close and feels spotty.
+    CBox buttonFieldRect(Vector2D size, int btn, bool showButtons);
+
+    // Which button a bar-local point is over, or BTN_NONE. Draws no icon and dispatches
+    // nothing; it is geometry only.
+    int  buttonAt(Vector2D size, const Vector2D& p, bool showButtons);
 
     // The flexible region between the left button field and the right pair.
     CBox titleField(Vector2D size);

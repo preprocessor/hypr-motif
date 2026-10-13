@@ -4,6 +4,7 @@
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 
@@ -132,10 +133,8 @@ void CCdeDecoration::runButtonAction(int btn) {
 
     switch (btn) {
         case CDE::BTN_CLOSE: Config::Actions::closeWindow(self); break;
+        case CDE::BTN_FLOAT: Config::Actions::floatWindow(Config::Actions::TOGGLE_ACTION_TOGGLE, self); break;
         case CDE::BTN_MAX: Config::Actions::fullscreenWindow(Fullscreen::FSMODE_FULLSCREEN, true, self); break;
-        // The float glyph wants floatWindow(TOGGLE_ACTION_TOGGLE). Note there is no
-        // `minimize` dispatcher or action in 0.56.2 at all — the old string dispatch for
-        // it was silently doing nothing.
         default: break;
     }
 }
@@ -159,6 +158,27 @@ void CCdeDecoration::retexture(float scale) {
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
+    // Hyprland 0.56.2 has NO call site for INPUT_TYPE_MOTION — the enum value exists but
+    // nothing ever sends it, so hover cannot arrive as an event. Poll the cursor instead:
+    // this runs every frame and is a point-in-rect test, so hover costs nothing and
+    // cannot miss a movement the way an event handler could.
+    if (isTop() && windowVisible() && g_pInputManager) {
+        const int under = CDE::buttonAt(outerBox().size(), g_pInputManager->getMouseCoordsInternal() - barBoxGlobal().pos(), CDE::config().showButtons);
+        if (under != m_hovered) {
+            m_hovered = under;
+            m_barTex.reset();
+        }
+        // A press whose release never arrives (drag off the bar, window moved under the
+        // cursor, button released outside the decoration) would otherwise leave the glyph
+        // stuck in its inverted "pressed" palette forever. Dropping it here is what keeps
+        // the icon stable.
+        if (m_clickButton != CDE::BTN_NONE && under != m_clickButton) {
+            m_clickButton = CDE::BTN_NONE;
+            m_pressed     = CDE::BTN_NONE;
+            m_barTex.reset();
+        }
+    }
+
     // Size is part of the cache key. The four edges are positioned independently and a
     // sibling can be repositioned after we raster, which would otherwise leave a
     // stale texture stretched over the new box — e.g. a frame band one pixel thin.
@@ -184,14 +204,9 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     // never hits anything, which is why no button responded before.
     const Vector2D p = pos - barBoxGlobal().pos();
 
-    auto buttonAt = [&](const Vector2D& q) -> int {
-        for (int b = 0; b < CDE::BTN_COUNT; ++b) {
-            const CBox r = CDE::buttonRect(size, b, buttons);
-            if (r.w && q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h)
-                return b;
-        }
-        return CDE::BTN_NONE;
-    };
+    // chrome.cpp owns the field geometry AND the hit-test against it, so the clickable
+    // area cannot drift from the drawn one.
+    auto buttonAt = [&](const Vector2D& q) { return CDE::buttonAt(size, q, buttons); };
 
     // Keep the pressed highlight in step with the click being tracked. Runs on both
     // edges, so the button un-presses even when the release lands somewhere else.
@@ -246,7 +261,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
 }
 
 void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
-    if (!m_assigned.w || !m_assigned.h || !m_window || !m_window->m_isMapped)
+    if (!windowVisible())
         return;
 
     const float scale = monitor ? monitor->scale() : 1.f;
