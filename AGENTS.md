@@ -115,9 +115,8 @@ Gaps, in the order they bite:
 
 - **No resize handles on the frame edges.** The left/right/bottom decorations swallow no
   input and do nothing; CDE has resize grips in the corners.
-- **`bar_height` changes at runtime are untested** — it feeds `desiredExtents`, so it only
-  takes effect once the positioner re-runs (`damageEntire()`). Most likely to need a
-  second pass.
+- **`bar_height` changes at runtime now work**, but only through `config.reloaded` — see
+  `## Bar height`. A `hyprctl eval 'hl.config(...)'` alone will not do it.
 - The active border still double-draws — see `## Known unknown`.
 - Buttons work only when **no mouse binding consumes the press**. See `## Button input`.
 
@@ -225,11 +224,16 @@ right frame:  LDDDD   then  LLLLD
 The lit pixel sits at local x=0 on both — the *outer* edge on the left strip, the *inner*
 one on the right, so on a dark-outer strip the outermost pixel of row two stays dark.
 
-`CORNER_GRAB` is a fixed 21, measured from one window. The only other window in CDE-7.png
-is cut off at the image edge. Do not "derive" it from `BORDER` without a second data point
-— though new-standard.png gives one that agrees on the relation: 24 with a 25px bar, i.e.
-`BAR_HEIGHT - 1`. We keep 21 because we keep the 22px bar; if the bar height changes the
-grab follows it and nothing else about the corner changes.
+`CORNER_GRAB` is **derived from the bar height**, not fixed: `cornerGrab() = max(6, barHeight - 1)`.
+Two reference data points agree on the relation — CDE-7's grab is 21 with a 22px bar,
+new-standard.png's is 24 with a 25px bar. Both are `BAR_HEIGHT - 1`, so it scales with
+`plugin:cde:bar_height`; `CORNER_GRAB_REF` in `chrome.hpp` is only the measured value for
+the default bar. This is the "corner accent", and it has to scale because it is measured
+along the bar's own height — the same distance marks the same square on the left, right and
+bottom frame strips, which is why one value drives all four corners. Verified live by
+changing the bar 22 → 30: the vertical rule moves from bar-rel 21 to 29, and at 22 it
+happens to coincide with the left-field separator at 21 (they are the same column, which
+is why `grabRule` is drawn as its own pass rather than by widening those separators).
 
 ## Title bar anatomy
 
@@ -354,6 +358,31 @@ With the dark palette (`color_face #333333`, `color_light #555555`, `color_dark 
 the rendered bar contains exactly four colours — face, light, dark and the title — which
 is the check to run after touching this code. If greys appear between the glyph edges,
 antialiasing came back.
+
+## Bar height
+
+`plugin:cde:bar_height` (int, default 22, clamped to ≥16) sizes the title bar, and it
+**works at runtime** — verified live by taking the bar from 22 to 30 and back.
+
+It needs two things, and doing only the first is the trap:
+
+1. `barHeight` feeds `getPositioningInfo`'s `desiredExtents`, so `config.reloaded` must
+   bump the generation to re-raster… but
+2. **bumping the generation is not enough.** The bar's height is decided by the
+   *positioner*, which only re-runs when told to. Re-rastering alone produces a texture
+   of the new height stretched over a box that is still the old one. `main.cpp`'s
+   `config.reloaded` listener therefore calls `g_pDecorationPositioner->onWindowUpdate(w)`
+   per mapped window (public, and documented "called on resize") and drops the decorations'
+   textures, since their geometry is about to change under them.
+
+**Only `config.reloaded` does this.** Setting the value with
+`hyprctl eval 'hl.config({...})'` does not reliably fire that event, so the bar keeps the
+old height even though `hyprctl getoption` reports the new one — measured, not assumed.
+Follow an eval with `hyprctl reload`, or set it in `hyprland.conf`.
+
+Everything that measures a distance along the bar derives from this value — the field
+band, the title baseline and the corner grab (`## Corners`) — so a taller bar grows all of
+them together rather than stretching the chrome.
 
 ## Config options
 
@@ -623,8 +652,7 @@ Hyprland's shadow looks wrong, leave it off.
    ```
    Also needs `Event::bus()->m_events.window.updateRules` to invalidate that window, or a
    rule change will not redraw until something else does. Cheap and self-contained.
-2. Make `bar_height` changes take effect at runtime (needs `damageEntire()` on reload).
-3. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
+2. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
 
 ## Non-goals
 

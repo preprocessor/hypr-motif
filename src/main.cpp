@@ -61,7 +61,29 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // IValue has no per-value change callback, so live reload has to go through
     // the config event and a generation counter the decorations compare against.
-    static auto PR = Event::bus()->m_events.config.reloaded.listen([] { CDE::bumpGeneration(); });
+    //
+    // bar_height feeds getPositioningInfo's desiredExtents, and the positioner only
+    // re-runs when it is told to — bumping the generation alone just re-rasterises a bar
+    // that is still the old height. onWindowUpdate is what makes the change take effect
+    // at runtime; the decorations' textures are dropped too, since their geometry is
+    // about to change under them.
+    static auto PR = Event::bus()->m_events.config.reloaded.listen([] {
+        CDE::bumpGeneration();
+
+        for (const auto& w : Desktop::windowState()->windows()) {
+            if (!w || !w->m_isMapped)
+                continue;
+
+            for (const auto& d : w->m_windowDecorations) {
+                auto* cde = dynamic_cast<CCdeDecoration*>(d.get());
+                if (!cde)
+                    continue;
+
+                cde->invalidate();
+                g_pDecorationPositioner->onWindowUpdate(w);
+            }
+        }
+    });
 
     // A title change has to be handled from HERE, not from draw(). Nothing damages a
     // decoration when only its text changes (CWindow::onUpdateMeta posts events and

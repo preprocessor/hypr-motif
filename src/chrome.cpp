@@ -188,6 +188,14 @@ namespace {
 
 namespace CDE {
 
+    // The corner grab square is BAR_HEIGHT - 1 at both reference data points (21 with a
+    // 22px bar, 24 with a 25px one), so it tracks the configured bar height rather than
+    // being a fixed 21. Clamped to something the rules can actually mark: below ~6px the
+    // two grab rules and the field separators would overlap into mush.
+    int cornerGrab() {
+        return std::max(6, config().barHeight - 1);
+    }
+
     // Reference: examples/CDE-7.png. The left field runs from bar-relative x6..x20,
     // so the separator that closes it sits at x21.
     double leftFieldEnd(Vector2D size) {
@@ -306,15 +314,16 @@ namespace CDE {
         // separators, but reaches further, so it is drawn separately rather than by
         // widening those. The groove's light row breaks it, which is what the reference
         // shows, hence the two spans.
-        if (size.x > CORNER_GRAB * 2 + 4) {
+        const int grab = cornerGrab();
+        if (size.x > grab * 2 + 4) {
             const double above = BEVEL + GROOVE + 1;          // rows 1..BEVEL+GROOVE
             const double below = above + GROOVE + 1;          // rows BEVEL+GROOVE+2..h-1
             auto        grabRule = [&](double x) {
                 separator(cr, x, 1, above, p);
                 separator(cr, x, below, size.y - below, p);
             };
-            grabRule(CORNER_GRAB);
-            grabRule(size.x - CORNER_GRAB - 2);
+            grabRule(grab);
+            grabRule(size.x - grab - 2);
         }
 
         if (config().showButtons) {
@@ -426,6 +435,10 @@ namespace CDE {
         // same bands by construction. `outerIsHigh` says which end faces away from the
         // client: for the left strip that is the low end, for right and bottom the high
         // end — which is why the lit band swaps sides between them.
+        // `grab` is the corner-grab square, measured along the BAR's height, so the same
+        // value marks the grab square on the frame strips as on the bar.
+        const int grab = cornerGrab();
+
         switch (edge) {
             case DECORATION_EDGE_LEFT: bevelBands(cr, 0, 0, size.y, true, false, p); break;
             case DECORATION_EDGE_RIGHT: bevelBands(cr, 0, 0, size.y, true, true, p); break;
@@ -438,23 +451,23 @@ namespace CDE {
         // rows, which is what makes the bevel read as spanning the full width), while the
         // bottom strip is drawn last and so takes the bottom pair. The top corner grab
         // boundaries need no new rules — the bar's bottom edge and its own field
-        // separators already fall exactly on CORNER_GRAB.
+        // separators already fall exactly on the grab square.
         if (edge == DECORATION_EDGE_LEFT) {
             drawCorner(cr, 0, 0, TL, p);
             // Horizontal rule at each end. The top one lands on the bar's bottom edge.
-            grabSeparator(cr, 0, CDE::CORNER_GRAB, 1, true, false, p);
-            grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, false, p);
+            grabSeparator(cr, 0, grab, 1, true, false, p);
+            grabSeparator(cr, 0, size.y - grab - 2, 1, true, false, p);
         } else if (edge == DECORATION_EDGE_RIGHT) {
             drawCorner(cr, 0, 0, TR, p);
-            grabSeparator(cr, 0, CDE::CORNER_GRAB, 1, true, true, p);
-            grabSeparator(cr, 0, size.y - CDE::CORNER_GRAB - 2, 1, true, true, p);
+            grabSeparator(cr, 0, grab, 1, true, true, p);
+            grabSeparator(cr, 0, size.y - grab - 2, 1, true, true, p);
         } else if (edge == DECORATION_EDGE_BOTTOM) {
             drawCorner(cr, 0, 0, BL, p);
             drawCorner(cr, size.x - CDE::BORDER, 0, BR, p);
 
             // Vertical rule, spanning the middle 3 rows of the strip.
-            grabSeparator(cr, CDE::CORNER_GRAB, 0, 0, false, true, p);
-            grabSeparator(cr, size.x - CDE::CORNER_GRAB - 2, 0, 0, false, true, p);
+            grabSeparator(cr, grab, 0, 0, false, true, p);
+            grabSeparator(cr, size.x - grab - 2, 0, 0, false, true, p);
         }
 
         cairo_destroy(cr);

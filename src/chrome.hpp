@@ -46,12 +46,20 @@ namespace CDE {
     inline constexpr int BORDER      = 5;
     inline constexpr int FACE_BAND  = 2; // grey face between the two bevels
 
-    // CDE marks a 21px square resize grip at each corner, delimited by separator lines.
-    // Measured from CDE-7.png: the vertical rule sits at bar-rel 21 and width-23, the
-    // horizontal 21px up from the bottom edge. Fixed, not derived — the only other
-    // window in that screenshot is cut off at the image edge, so there is nothing to
-    // confirm a formula against.
-    inline constexpr int CORNER_GRAB = 21;
+    // CDE marks a square resize grip at each corner, delimited by separator lines.
+    // Measured from CDE-7.png: with a 22px bar the vertical rule sits at bar-rel 21 and
+    // width-23, the horizontal 21px up from the bottom edge — and new-standard.png gives
+    // the confirming second data point (24 with a 25px bar). Both are BAR_HEIGHT - 1, so
+    // the grab is DERIVED from the configured bar height rather than fixed; the constant
+    // below is only the measured value for the default bar, kept as the reference.
+    //
+    // This is the "corner accent": it scales with the bar, and it has to, because it is
+    // measured along the bar's own height — on the side and bottom frames the same
+    // distance marks the same square, so one value drives all four corners.
+    inline constexpr int CORNER_GRAB_REF = 21;
+
+    // Live corner-grab size for the current bar height.
+    int cornerGrab();
 
 
     // Named for what they DO, not for Motif's usual role: the middle button carries a
