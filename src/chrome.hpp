@@ -26,7 +26,7 @@ namespace CDE {
     inline constexpr int GROOVE      = 1; // dark+light groove below the bevel
     inline constexpr int SIDE        = 1; // separator is dark+light, this is each
     inline constexpr int FIELD_W     = 15; // width of a button field
-    inline constexpr int FLOAT_GLYPH = 7; // float-toggle icon, from examples/float-toggle.png
+    inline constexpr int FLOAT_GLYPH = 9; // float-toggle icon, from examples/float-toggle.png
     inline constexpr int LEFT_SEP     = 4; // first separator, bar-relative
     inline constexpr int RIGHT_MARGIN = 6; // window edge to the outermost separator
 

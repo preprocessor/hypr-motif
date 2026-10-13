@@ -130,19 +130,22 @@ namespace {
     }
 
     // The float-toggle glyph for the left button of the right pair, measured from
-    // examples/float-toggle.png (11x11 with a 2px margin, trimmed to the 7x7 core).
-    // Two overlapping 5x5 outlined squares, the back one offset up-right; the front
+    // examples/float-toggle.png (15x15, 3px margin trimmed to the 9x9 core). Two
+    // overlapping 6x6 outlined squares (4x4 hollow), the back one offset up-right by
+    // THREE — the second revision of the image; the first had offset two. The front
     // square's interior is opaque and occludes the back one's bottom-left corner. Light
     // on top/left edges, dark on bottom/right — the same raised-bevel convention as the
     // other glyphs. Replaces the bare 4x4 rect Motif puts there; the reference is
     // user-supplied, so it outranks CDE-7.png for this button.
-    constexpr const char* FLOAT_TOGGLE = "..LLLLL"
-                                         "..L...D"
-                                         "LLLLL.D"
-                                         "L...D.D"
-                                         "L...DDD"
-                                         "L...D.."
-                                         "LDDDD..";
+    constexpr const char* FLOAT_TOGGLE = "...LLLLLL"
+                                         "...L....D"
+                                         "...L....D"
+                                         "LLLLLL..D"
+                                         "LFFFFD..D"
+                                         "LFFFFDDDD"
+                                         "LFFFFD..."
+                                         "LFFFFD..."
+                                         "LDDDDD...";
 
     void drawFloatToggle(cairo_t* cr, double x, double y, const SPalette& p) {
         for (int r = 0; r < CDE::FLOAT_GLYPH; ++r)
@@ -209,7 +212,7 @@ namespace CDE {
 
         double w = 4, h = 4;
         if (btn == BTN_MAX)
-            w = h = 9;
+            w = h = 11; // 2px larger than the 9x9 reference, still centred
         else if (btn == BTN_CLOSE)
             w = 9, h = 4;
         else if (btn == BTN_MIN)

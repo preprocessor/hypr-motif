@@ -307,8 +307,8 @@ bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 20 | 21
 | Glyph | Size | Bar rows | Notes |
 |---|---|---|---|
 | left (window menu) | 9x4 | 11-14 | we draw close here — a bare raised rect, no X |
-| minimize | 7x7 | 10-16 | **float-toggle icon**, user-supplied (`examples/float-toggle.png`) — replaces the 4x4 bare rect CDE-7 shows |
-| maximize | 9x9 | 9-17 | bare raised rect, in the rightmost field |
+| minimize | 8x8 | 9-16 | **float-toggle icon**, user-supplied (`examples/float-toggle.png`), enlarged to 6x6 boxes per request — replaces the 4x4 bare rect CDE-7 shows |
+| maximize | 11x11 | 8-18 | bare raised rect, in the rightmost field; 2px larger than the 9x9 reference, still centred |
 
 The field centre is `x.5` because the field is an odd height. **Floor both axes of the
 glyph origin.** The field's own centre is half a pixel on y. Hand Cairo a fractional origin
@@ -320,7 +320,7 @@ Centring on the bar instead of the field puts every glyph ~2px high, which is ve
 visible against the reference. Motif draws **no icon inside any of the three**; do not
 add one, and in particular do not draw an X — a 9x4 box has no room for one and it
 renders as a dark blob. **Exception, deliberate:** the minimize button carries the
-float-toggle icon (two overlapping 5x5 outlined squares, back one offset up-right, front
+float-toggle icon (two overlapping 6x6 outlined squares, back one offset up-right, front
 interior opaque; encoded as the literal `FLOAT_TOGGLE` pattern in `chrome.cpp`, same
 idiom as the corner mitres). Light on top/left edges, dark on bottom/right; pressed
 inverts the bevel like `glyphFrame` does. `examples/float-toggle.png` outranks CDE-7.png
