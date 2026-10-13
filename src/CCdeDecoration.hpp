@@ -30,6 +30,20 @@ class CCdeDecoration : public IHyprWindowDecoration {
     std::string                getDisplayName() override;
     bool                       onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data = {}) override;
 
+  public:
+    // Hyprland does not damage a plugin decoration when only its CONTENTS change (a
+    // title update), so the new texture's pass is culled and the old text stays. This
+    // damages the bar's region explicitly; called whenever we build a fresh texture.
+    // Public because main.cpp's window.title listener needs it — the damage has to come
+    // from outside draw(), which is not called at all when nothing is damaged.
+    void damageBar();
+
+    // Drops the cached raster so the next draw() rebuilds it. Public for the same
+    // reason; the event handler has no other way to invalidate the cache.
+    void invalidate() {
+        m_barTex.reset();
+    }
+
   private:
     bool isTop() const {
         return m_edge == DECORATION_EDGE_TOP;

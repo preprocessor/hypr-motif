@@ -63,6 +63,29 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // the config event and a generation counter the decorations compare against.
     static auto PR = Event::bus()->m_events.config.reloaded.listen([] { CDE::bumpGeneration(); });
 
+    // A title change has to be handled from HERE, not from draw(). Nothing damages a
+    // decoration when only its text changes (CWindow::onUpdateMeta posts events and
+    // calls updateToplevel, nothing else), and Hyprland only calls a decoration's
+    // draw() when that decoration's region is being repainted — so with no damage the
+    // bar is never redrawn, and draw() never gets the chance to notice the title
+    // changed. Damage the bar here and the next frame picks the new title up.
+    //
+    // Without this the title only refreshes when something unrelated (a resize, the
+    // zoom effect, a workspace change) happens to damage the same pixels.
+    static auto PT = Event::bus()->m_events.window.title.listen([](PHLWINDOW w) {
+        if (!w)
+            return;
+
+        for (const auto& d : w->m_windowDecorations) {
+            auto* cde = dynamic_cast<CCdeDecoration*>(d.get());
+            if (!cde)
+                continue;
+
+            cde->invalidate();
+            cde->damageBar();
+        }
+    });
+
     // Windows that already exist are not covered by the open event.
     for (auto& w : Desktop::windowState()->windows())
         onNewWindow(w);

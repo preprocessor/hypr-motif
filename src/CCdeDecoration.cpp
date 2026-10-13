@@ -95,6 +95,28 @@ CBox CCdeDecoration::outerBox() const {
 
 void CCdeDecoration::damageEntire() {
     m_barTex.reset();
+    damageBar();
+}
+
+// Hyprland NEVER damages a plugin decoration's region on the plugin's behalf: on a title
+// change CWindow::onUpdateMeta only posts events and calls updateToplevel() — nothing
+// touches the decoration box. The render pass is then culled and the bar keeps showing
+// the old text until something unrelated (a resize, a zoom, a workspace change) damages
+// that area, which is exactly the "title only updates when I resize" bug. Damaging it
+// ourselves is the fix, and it is cheap: it only happens when the texture actually
+// changed, so the steady state still culls cleanly.
+void CCdeDecoration::damageBar() {
+    if (!windowVisible())
+        return;
+
+    // Expand by 1px: the compositor's damage is inclusive of edges, and a one-pixel
+    // shortfall shows as a stale sliver along the bar's bottom or right edge.
+    CBox box = barBoxGlobal();
+    box.x -= 1;
+    box.y -= 1;
+    box.w += 2;
+    box.h += 2;
+    g_pHyprRenderer->damageBox(box);
 }
 
 eDecorationType CCdeDecoration::getDecorationType() {
@@ -155,6 +177,9 @@ void CCdeDecoration::retexture(float scale) {
     m_lastSize    = box.size();
     m_lastFocused = act ? 1 : 0;
     m_generation  = CDE::generation();
+
+    // A brand new texture has to be repainted, not just re-queued: see damageBar().
+    damageBar();
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
