@@ -344,11 +344,6 @@ Set them under `hl.config({ plugin = { cde = { ... } } })` in your config.
 | `color_light_active` | colour | `#f7d9c0` |
 | `color_dark_active` | colour | `#7d593b` |
 | `color_title_active` | colour | `#000000` |
-| `shadow_enabled` | bool | `true` |
-| `shadow_color` | colour | `#000000` |
-| `shadow_color2` | colour | `#000000` |
-| `shadow_opacity1` | float | `0.5` |
-| `shadow_opacity2` | float | `0.75` |
 
 The un-suffixed colours apply to **unfocused** windows; the `_active` ones to the focused
 window. The active face/light/dark are measured from `examples/new-standard.png`.
@@ -579,78 +574,13 @@ yes/no question.
 `m_lastFocused` is an **int** initialised to `-1`, not a bool. A bool defaulting to false
 would read as a valid cache hit on the first frame of an unfocused window.
 
-## Shadow
+## Shadow — removed
 
-We draw our own shadow rather than using Hyprland's. **Leave `decoration:shadow:enabled`
-off** — with both on you get two shadows.
+The plugin draws **no shadow**. A previous revision rendered an ordered 8×8 Bayer dither
+on the right and bottom edges; it was removed entirely (renderer, `shadowBox()`,
+`m_shadowTex`, and all `plugin:cde:shadow_*` config values). Do not reintroduce one by
+accident — in particular, `decoration:shadow:enabled` in `hyprland.conf` now renders
+Hyprland's own shadow unopposed, which previously mis-sized its bottom edge to ~46px when
+a plugin reserved space (measured; mechanism unknown, `getPositioningInfo()` has no body
+in the shipped headers). If Hyprland's shadow looks wrong, leave it off.
 
-`CHyprDropShadowDecoration` derives its box from the window geometry and gets it wrong
-once a plugin reserves space. Measured, with everything else identical:
-
-| below the window | shadow extent |
-|---|---|
-| plugin unloaded | 8px (correct) |
-| plugin loaded | **46px** |
-
-The top and left edges stayed correct at 7-8px, so it is specific to the bottom edge. It is
-**not** our decoration `priority` (measured unchanged at `priority = 0`) and **not**
-`bar_height`. The exact mechanism is unknown: `getPositioningInfo()` is declared in
-`CHyprDropShadowDecoration.hpp` with no body — nixpkgs ships headers only.
-
-Because we already know the outer box exactly, drawing it ourselves is correct by
-construction and cannot fight the positioner. The shadow is **not** a gradient — it is an
-**ordered dither** with an 8×8 Bayer threshold matrix (`renderDitherShadow()` in
-`chrome.cpp`).
-
-### Dithered shadows
-
-Only the RIGHT and BOTTOM edges cast a shadow (the two outer edges of the window ring).
-Each builds one texture, blitted via `CTexPassElement` *before* the frame so the frame
-paints over any bleed. The shadow is **exactly one Bayer tile: 8 logical px, straight down
-and to the right of the window** — the shape a square shadow offset by (8, 8) would cast.
-The two loose ends are **inset by BAYER_N** (right strip starts 8px below the window's top
-edge, bottom strip 8px right of its left edge); there is no wrap-around on the left or
-top, and the extent is fixed by `BAYER_N`, not configurable (`shadow_range` was removed).
-
-- Per-pixel distance `d` is 1-based, in **logical** px: the flat strip uses the thin-axis
-  coordinate; the bottom-right corner is **Chebyshev `max(dx, dy)`**, whose iso-lines are
-  axis-aligned, so the shadow's outer boundary is a **square** corner. Don't reintroduce
-  45-degree chamfers — they cut a diagonal across the corner.
-- The bottom texture owns the corner (`shadowBox()` bottom = `{x+8, y+h, w, 8}`, right =
-  `{x+w, y+8, 8, h-8}`), and the right strip stops at the window's bottom edge, so **no
-  pixel is written by two textures**. The corner is the bottom texture's last `rDev`
-  columns, so `winW = w - rDev` in `renderDitherShadow` needs no knowledge of the inset.
-- Eight fade levels, one per logical px: `level = BAYER_N + 1 - d`. Level 8 (d=1, flush
-  against the frame) is solid; level 1 (d=8) holds only the sparsest dots; `level <= 0`
-  paints nothing.
-- **Two tones off one cell.** `cell < level*8` paints the strong tone, `cell <
-  (level+1)*8` the soft one — the soft band is the next level's strong band, so the ramp
-  reads dot → dot2 → nothing instead of falling straight to zero. `shadow_opacity2 = 0`
-  collapses it back to single-tone (the tone's alpha is 0, so it packs invisible).
-- **The outward distance always drives the Bayer ROW, rotated by one** (`(outward + 1) &
-  7`). The rotation is load-bearing: unrotated, d=8 lands on matrix row 7, whose minimum
-  (21) no level-1 threshold catches, and the band's **last row comes out deterministically
-  blank** — a guaranteed 1px gap at the fringe. Rotated, d=8 samples row 0 (min 0), and
-  every row of the band shows dots. Verified in simulation: per-distance counts descend
-  64/56/48/…/8 strong with 8 soft each from d=2.
-- The corner's Bayer COLUMN is corner-local (`dx` from the window's right edge), so the
-  corner pattern is width-independent — it renders identically on resize and across
-  windows. It phase-jumps where the corner meets the flat strip; accepted, it reads as a
-  subtle rhythm change in a featureless fade.
-- A single row/column of an 8×8 Bayer is not well-distributed, so individual scanlines of
-  the ramp alternate dense/sparse (e.g. `#.#.#.#.` next to a solid row). That is correct
-  ordered dithering, not a bug — do not "fix" it by randomising per-row.
-- Config: `plugin:cde:shadow_enabled` (bool), `plugin:cde:shadow_color` /
-  `shadow_color2` (RGB of strong / soft tone), `plugin:cde:shadow_opacity1` /
-  `shadow_opacity2` (float 0–1, tone alphas).
-
-**A note on what looks like a bug in a pixel scan.** At density 0.5 the 8×8 Bayer can
-produce long runs (e.g. `SSSS....SSS.SSSS` horizontally, `....SSSSSSSS....` vertically),
-because a single row/column of an 8×8 Bayer is not itself well-distributed. That is
-correct — the *matrix* distributes dots well across the full 8×8 area, but a slice
-is not. Do not "fix" it by randomising per-row.
-
-Untested: whether the shadow smears when a window moves, since the shadow sits outside the
-window's damage region — stale pixels do linger after a drag (observed at a corner after
-moving a window). Nothing can be dispatched in this environment to move a window
-deliberately; the drag was incidental.

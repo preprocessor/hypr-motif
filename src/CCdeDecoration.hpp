@@ -42,9 +42,6 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // separators out of register with the buttons.
     CBox outerBox() const;
 
-    // Drop shadow box for this edge. Only RIGHT and BOTTOM cast shadows.
-    CBox shadowBox() const;
-
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
     // focused window, not the one losing focus, so an event handler would have to track
@@ -65,9 +62,6 @@ class CCdeDecoration : public IHyprWindowDecoration {
     CBox         m_assigned = {0, 0, 0, 0};
 
     SP<Render::ITexture> m_barTex;
-    SP<Render::ITexture> m_shadowTex;
-    CBox                 m_lastShadowBox = {};
-
 
     std::string m_lastTitle;
     float       m_lastScale = 0.f;

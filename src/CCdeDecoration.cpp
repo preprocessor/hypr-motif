@@ -13,10 +13,7 @@ CCdeDecoration::CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name)
     , m_edge(edge)
     , m_name(std::move(name)) {}
 
-CCdeDecoration::~CCdeDecoration() {
-    if (m_lastShadowBox.w > 0 && m_lastShadowBox.h > 0)
-        g_pHyprRenderer->damageBox(m_lastShadowBox);
-}
+CCdeDecoration::~CCdeDecoration() = default;
 
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     const auto& cfg = CDE::config();
@@ -95,8 +92,6 @@ CBox CCdeDecoration::outerBox() const {
 
 void CCdeDecoration::damageEntire() {
     m_barTex.reset();
-    if (m_lastShadowBox.w > 0 && m_lastShadowBox.h > 0)
-        g_pHyprRenderer->damageBox(m_lastShadowBox);
 }
 
 eDecorationType CCdeDecoration::getDecorationType() {
@@ -119,28 +114,6 @@ void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
     HyprlandAPI::invokeHyprctlCommand("dispatch", args.empty() ? cmd : cmd + " " + args);
 }
 
-CBox CCdeDecoration::shadowBox() const {
-    const auto cfg = CDE::config();
-    if (!cfg.shadowEnabled)
-        return {};
-
-    const CBox outer = outerBox();
-    if (!outer.w || !outer.h)
-        return {};
-
-    // The shadow is exactly one Bayer tile: BAYER_N logical px, straight down and to
-    // the right of the window — the shape a square shadow offset by (8, 8) would cast.
-    // The two loose ends are inset by BAYER_N: the right strip starts 8px below the
-    // window's top edge and the bottom strip 8px right of its left edge. The bottom
-    // texture carries the bottom-right square corner; the right strip stops at the
-    // window's bottom edge, so no pixel is written by two textures.
-    switch (m_edge) {
-        case DECORATION_EDGE_RIGHT: return {outer.x + outer.w, outer.y + CDE::BAYER_N, CDE::BAYER_N, outer.h - CDE::BAYER_N};
-        case DECORATION_EDGE_BOTTOM: return {outer.x + CDE::BAYER_N, outer.y + outer.h, outer.w, CDE::BAYER_N};
-        default: return {};
-    }
-}
-
 void CCdeDecoration::retexture(float scale) {
     // Raster at exactly the box draw() will use, so the texture and the geometry cannot
     // drift apart.
@@ -157,17 +130,6 @@ void CCdeDecoration::retexture(float scale) {
     m_lastSize    = box.size();
     m_lastFocused = act ? 1 : 0;
     m_generation  = CDE::generation();
-
-    const CBox sh = shadowBox();
-    if (sh.w && sh.h) {
-        // The opacity knobs are the single source of truth for the two tones' alphas;
-        // the colour configs contribute RGB. opacity2 = 0 disables the soft tone.
-        const auto       cfg = CDE::config();
-        const CHyprColor tone1(cfg.shadowColor.r, cfg.shadowColor.g, cfg.shadowColor.b, cfg.shadowOpacity1);
-        const CHyprColor tone2(cfg.shadowColor2.r, cfg.shadowColor2.g, cfg.shadowColor2.b, cfg.shadowOpacity2);
-        m_shadowTex = CDE::renderDitherShadow(m_edge, sh.size(), scale, tone1, tone2);
-    } else
-        m_shadowTex = nullptr;
 }
 
 void CCdeDecoration::ensureTextures(float scale) {
@@ -267,31 +229,6 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
 
     if (m_window->m_workspace && !m_window->m_pinned)
         global.translate(m_window->m_workspace->m_renderOffset->value());
-
-    // Shadow first, so the frame paints over any overlap.
-    const CBox sb = shadowBox();
-    if (sb.w && sb.h && m_shadowTex) {
-        CBox g = sb;
-        if (m_window->m_workspace && !m_window->m_pinned)
-            g.translate(m_window->m_workspace->m_renderOffset->value());
-
-        if (m_lastShadowBox.w && m_lastShadowBox.h && (m_lastShadowBox.x != g.x || m_lastShadowBox.y != g.y || m_lastShadowBox.w != g.w || m_lastShadowBox.h != g.h))
-            g_pHyprRenderer->damageBox(m_lastShadowBox);
-        m_lastShadowBox = g;
-
-        CTexPassElement::SRenderData sd;
-        sd.tex        = m_shadowTex;
-        sd.box        = g;
-        sd.a          = alpha;
-        sd.damage     = CRegion(g);
-        sd.clipBox    = g;
-        sd.clipRegion = CRegion(g);
-        g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(sd)));
-    } else if (m_lastShadowBox.w && m_lastShadowBox.h) {
-        g_pHyprRenderer->damageBox(m_lastShadowBox);
-        m_lastShadowBox = {};
-    }
-
 
     // Decorations cannot draw to the framebuffer directly: draw() runs outside the GL
     // pass. Queue a texture element and let the compositor's element renderer issue the
