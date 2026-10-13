@@ -42,6 +42,17 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // separators out of register with the buttons.
     CBox outerBox() const;
 
+    // outerBox() translated into the space the compositor actually hands input and draw
+    // calls in: global screen coordinates, workspace render offset included. The bar
+    // edge only.
+    CBox barBoxGlobal() const;
+
+    // What a completed click on `btn` does. Actions are called through
+    // Config::Actions with our own window, so they target the window whose bar was
+    // clicked rather than whatever happens to be focused, and so they work under both
+    // the hyprlang and the Lua config backends.
+    void runButtonAction(int btn);
+
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
     // focused window, not the one losing focus, so an event handler would have to track
@@ -72,8 +83,10 @@ class CCdeDecoration : public IHyprWindowDecoration {
     uint64_t    m_generation = 0;
     int         m_hovered    = CDE::BTN_NONE;
     int         m_pressed    = CDE::BTN_NONE;
+    // Button the press landed on. Kept separate from m_pressed because the action fires
+    // on release, and only if the release lands on the same button.
+    int         m_clickButton = CDE::BTN_NONE;
     Vector2D    m_dragStart;
 
     void        retexture(float scale);
-    void        dispatch(const std::string& cmd, const std::string& args = "");
 };

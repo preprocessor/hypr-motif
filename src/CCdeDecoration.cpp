@@ -1,7 +1,9 @@
 #include "CCdeDecoration.hpp"
 
+#include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
-#include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/devices/IPointer.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 
@@ -110,8 +112,32 @@ std::string CCdeDecoration::getDisplayName() {
     return m_name;
 }
 
-void CCdeDecoration::dispatch(const std::string& cmd, const std::string& args) {
-    HyprlandAPI::invokeHyprctlCommand("dispatch", args.empty() ? cmd : cmd + " " + args);
+CBox CCdeDecoration::barBoxGlobal() const {
+    CBox box = outerBox();
+    if (m_window->m_workspace && !m_window->m_pinned)
+        box.translate(m_window->m_workspace->m_renderOffset->value());
+    return box;
+}
+
+void CCdeDecoration::runButtonAction(int btn) {
+    // Actions take the window explicitly: the click may land on the bar of a window that
+    // is not the focused one, and a global dispatcher would act on the wrong window.
+    //
+    // Deliberately NOT going through `HyprlandAPI::invokeHyprctlCommand("dispatch", ...)`:
+    // under a Lua config `hyprctl dispatch <name> <args>` is eval'd as
+    // `hl.dispatch(name args)`, which is a syntax error for every classic dispatcher name
+    // (measured: `hyprctl dispatch exec true` → "')' expected near 'true'"). The Actions
+    // API is called in-process and needs no config-type branch.
+    const PHLWINDOW self = m_window.lock();
+
+    switch (btn) {
+        case CDE::BTN_CLOSE: Config::Actions::closeWindow(self); break;
+        case CDE::BTN_MAX: Config::Actions::fullscreenWindow(Fullscreen::FSMODE_FULLSCREEN, true, self); break;
+        // The float glyph wants floatWindow(TOGGLE_ACTION_TOGGLE). Note there is no
+        // `minimize` dispatcher or action in 0.56.2 at all — the old string dispatch for
+        // it was silently doing nothing.
+        default: break;
+    }
 }
 
 void CCdeDecoration::retexture(float scale) {
@@ -142,67 +168,78 @@ void CCdeDecoration::ensureTextures(float scale) {
     retexture(scale);
 }
 
-bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any) {
+bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data) {
     // Only the top edge has buttons; the frame edges are decorative for now.
     if (!isTop())
         return true;
 
-    const Vector2D size   = outerBox().size(); // match the widened bar the glyphs were drawn into
+    const Vector2D size    = outerBox().size(); // match the widened bar the glyphs were drawn into
     const bool     buttons = CDE::config().showButtons;
 
-    auto buttonAt = [&](const Vector2D& p) -> int {
+    // Hyprland passes the GLOBAL cursor position: CWindow::checkInputOnDecos
+    // (desktop/view/Window.cpp) forwards the very same coords it just tested with
+    // containsPoint(), and the built-in group bar subtracts its assignedBoxGlobal().pos()
+    // for exactly this reason. Every rect chrome.cpp hands back is bar-relative, so
+    // convert once here — hit-testing raw global coords against local rects silently
+    // never hits anything, which is why no button responded before.
+    const Vector2D p = pos - barBoxGlobal().pos();
+
+    auto buttonAt = [&](const Vector2D& q) -> int {
         for (int b = 0; b < CDE::BTN_COUNT; ++b) {
             const CBox r = CDE::buttonRect(size, b, buttons);
-            if (r.w && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
+            if (r.w && q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h)
                 return b;
         }
         return CDE::BTN_NONE;
     };
 
-    switch (type) {
-        case INPUT_TYPE_MOTION: {
-            const int hit = buttonAt(pos);
-            if (hit != m_hovered) {
-                m_hovered = hit;
-                m_barTex.reset();
-            }
-            return true;
+    // Keep the pressed highlight in step with the click being tracked. Runs on both
+    // edges, so the button un-presses even when the release lands somewhere else.
+    auto syncPressed = [&] {
+        if (m_clickButton != m_pressed) {
+            m_pressed = m_clickButton;
+            m_barTex.reset();
         }
+    };
 
+    switch (type) {
+        // INPUT_TYPE_BUTTON arrives on press AND release (InputManager.cpp,
+        // processMouseDownNormal), with the event in `data`. The action fires on the
+        // release — deliberately NOT on the drag pair: a DRAG_START we swallow stops
+        // Hyprland creating a drag target, and CDragStateController::dragEnd()
+        // early-returns without one, so DRAG_END would never reach us.
         case INPUT_TYPE_BUTTON: {
-            const int hit = buttonAt(pos);
-            if (hit != m_pressed) {
-                m_pressed = hit;
-                m_barTex.reset();
+            const auto* ev = std::any_cast<IPointer::SButtonEvent>(&data);
+            if (!ev || !ev->mouse || ev->button != BTN_LEFT)
+                return false;
+
+            if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED)
+                m_clickButton = buttonAt(p);
+            else {
+                const int held = m_clickButton;
+                const int hit  = buttonAt(p);
+                if (held != CDE::BTN_NONE && held == hit)
+                    runButtonAction(held);
             }
-            return false; // swallow, so the click activates a button rather than the client
+
+            syncPressed();
+            return false; // swallow both edges, so the click never reaches the client
         }
 
         case INPUT_TYPE_DRAG_START: {
-            m_dragStart = pos;
-            m_pressed   = buttonAt(pos);
-            m_barTex.reset();
-            return m_pressed == CDE::BTN_NONE;
+            m_dragStart = p;
+            // False on a button: a press landing on a button must never start a window
+            // drag. True on the bare bar, so a user-bound `mouse:... movewindow` can
+            // still drag the window by its title bar.
+            return buttonAt(p) == CDE::BTN_NONE;
         }
 
-        case INPUT_TYPE_DRAG_END: {
-            const int hit  = buttonAt(pos);
-            const int held = m_pressed;
-            m_pressed      = CDE::BTN_NONE;
-            m_barTex.reset();
-
-            if (held != CDE::BTN_NONE && held == hit) {
-                switch (held) {
-                    case CDE::BTN_MIN: dispatch("minimize"); break;
-                    case CDE::BTN_MAX: dispatch("fullscreen", "toggle"); break;
-                    case CDE::BTN_CLOSE: dispatch("closewindow"); break;
-                    default: break;
-                }
-            } else if (held == CDE::BTN_NONE && std::abs(pos.x - m_dragStart.x) > 2)
-                dispatch("movewindow", "cursor,0");
-
+        // Reached only when a drag really started, i.e. the press missed every button.
+        // The compositor has already moved the window by now; just drop the drag state.
+        case INPUT_TYPE_DRAG_END:
+            m_clickButton = CDE::BTN_NONE;
+            syncPressed();
             return true;
-        }
 
         default: return true;
     }
@@ -220,15 +257,13 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
         return;
 
 // Positioned from the positioner's answer for this decoration, re-expanded to the
-    // window's outer span. Do NOT use getBoxWithIncludedDecos() here: it already accounts
-    // for the space we ourselves reserved, so slicing it per edge is a feedback loop that
-    // drifts by the border width.
-    CBox global = outerBox();
+    // window's outer span — the same box onInputOnDeco converts global input into, so a
+    // click lands where it looks like it lands. Do NOT use getBoxWithIncludedDecos()
+    // here: it already accounts for the space we ourselves reserved, so slicing it per
+    // edge is a feedback loop that drifts by the border width.
+    CBox global = barBoxGlobal();
     if (!global.w || !global.h)
         return;
-
-    if (m_window->m_workspace && !m_window->m_pinned)
-        global.translate(m_window->m_workspace->m_renderOffset->value());
 
     // Decorations cannot draw to the framebuffer directly: draw() runs outside the GL
     // pass. Queue a texture element and let the compositor's element renderer issue the
