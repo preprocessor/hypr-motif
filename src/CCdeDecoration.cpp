@@ -182,22 +182,35 @@ void CCdeDecoration::retexture(float scale) {
     damageBar();
 }
 
+bool CCdeDecoration::syncHover(const Vector2D& globalPos) {
+    if (!isTop() || !windowVisible())
+        return false;
+
+    int under = CDE::BTN_NONE;
+    if (m_cachedBar.w > 0 && m_cachedBar.h > 0 && m_cachedBar.containsPoint(globalPos))
+        under = CDE::buttonAt(m_cachedBar.size(), globalPos - m_cachedBar.pos(), CDE::config().showButtons);
+
+    if (under == m_hovered)
+        return false;
+
+    m_hovered = under;
+    m_barTex.reset();
+    return true;
+}
+
 void CCdeDecoration::ensureTextures(float scale) {
     // Hyprland 0.56.2 has NO call site for INPUT_TYPE_MOTION — the enum value exists but
-    // nothing ever sends it, so hover cannot arrive as an event. Poll the cursor instead:
-    // this runs every frame and is a point-in-rect test, so hover costs nothing and
-    // cannot miss a movement the way an event handler could.
+    // nothing ever sends it, so hover cannot arrive as an event on the decoration itself.
+    // main.cpp drives it from the mouse motion listener via syncHover(); this poll is the
+    // belt-and-braces path for when that event is missed.
     if (isTop() && windowVisible() && g_pInputManager) {
-        const int under = CDE::buttonAt(outerBox().size(), g_pInputManager->getMouseCoordsInternal() - barBoxGlobal().pos(), CDE::config().showButtons);
-        if (under != m_hovered) {
-            m_hovered = under;
-            m_barTex.reset();
-        }
+        syncHover(g_pInputManager->getMouseCoordsInternal());
+
         // A press whose release never arrives (drag off the bar, window moved under the
         // cursor, button released outside the decoration) would otherwise leave the glyph
         // stuck in its inverted "pressed" palette forever. Dropping it here is what keeps
         // the icon stable.
-        if (m_clickButton != CDE::BTN_NONE && under != m_clickButton) {
+        if (m_clickButton != CDE::BTN_NONE && m_hovered != m_clickButton) {
             m_clickButton = CDE::BTN_NONE;
             m_pressed     = CDE::BTN_NONE;
             m_barTex.reset();
@@ -304,6 +317,11 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     CBox global = barBoxGlobal();
     if (!global.w || !global.h)
         return;
+
+    // Refreshed here so syncHover() can reject a cursor that is nowhere near this bar
+    // with a single rect test instead of recomputing the outer box per mouse move.
+    if (isTop())
+        m_cachedBar = global;
 
     // Decorations cannot draw to the framebuffer directly: draw() runs outside the GL
     // pass. Queue a texture element and let the compositor's element renderer issue the

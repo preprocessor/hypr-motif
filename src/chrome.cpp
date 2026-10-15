@@ -100,14 +100,14 @@ namespace {
         }
     }
 
-// The corners are MITRED, not overlapping rectangles. Measured 5x5 from CDE-7.png
+    // The corners are MITRED, not overlapping rectangles. Measured 5x5 from CDE-7.png
     // (bottom pair) and examples/new-standard.png (top pair); 'L'/'F'/'D' are the palette,
     // rows run inner->outer. Index 0 is the OUTERMOST column, so the top patterns read
     // left-to-right from the window edge inward, and the bottom ones from inner outward.
     //
     // The top pair is why the bar's bevel appears to span the full window width: rows 0-1
     // of TL/TR are light across, which is the bevel, and rows 2-3 drop the frame's inner
-    // band. Normal bands resume at row 5, below the mitre.
+   // band. Normal bands resume at row 5, below the mitre.
     constexpr const char* TL = "LLLLL"
                                "LLLLL"
                                "LLFFF"
@@ -196,16 +196,29 @@ namespace CDE {
         return std::max(6, config().barHeight - 1);
     }
 
+    // A button field is a SQUARE whose size follows the bar height: fieldH is whatever is
+    // left between the groove and the bottom edge, and the width matches it.
+    //
+    // FIELD_W (15) is the measured width at the measured 22px bar — and 22 - 6 - 1 = 15,
+    // so "make the field as wide as it is tall" reproduces the reference exactly at the
+    // size it was measured at, and grows in BOTH axes as the bar grows instead of only
+    // stretching in height. That is the same reasoning as cornerGrab(): one distance, read
+    // off the bar, drives every size along it.
+    double buttonFieldWidth(Vector2D size) {
+        const double fieldTop = BEVEL + 2 + GROOVE * 2;
+        return std::max(0.0, size.y - fieldTop - SIDE);
+    }
+
     // Reference: examples/CDE-7.png. The left field runs from bar-relative x6..x20,
     // so the separator that closes it sits at x21.
     double leftFieldEnd(Vector2D size) {
-        return LEFT_SEP + SIDE * 2 + FIELD_W;
+        return LEFT_SEP + SIDE * 2 + buttonFieldWidth(size);
     }
 
     // The right side carries three separators — title/fieldA, between the pair, and the
     // outermost one — at bar-relative x (width-40), (width-23) and (width-6).
     double rightFieldStart(Vector2D size) {
-        return size.x - RIGHT_MARGIN - 2 * (FIELD_W + SIDE * 2);
+        return size.x - RIGHT_MARGIN - 2 * (buttonFieldWidth(size) + SIDE * 2);
     }
 
     CBox titleField(Vector2D size) {
@@ -228,16 +241,17 @@ namespace CDE {
 
         const double fieldTop = BEVEL + 2 + GROOVE * 2;
         const double fieldH   = size.y - fieldTop - SIDE;
+        const double fieldW   = buttonFieldWidth(size); // square: as wide as it is tall
 
         double fieldX;
         if (btn == BTN_CLOSE)
             fieldX = LEFT_SEP + SIDE * 2;
         else if (btn == BTN_MAX)
-            fieldX = rightFieldStart(size) + SIDE * 2 + FIELD_W + SIDE * 2;
+            fieldX = rightFieldStart(size) + SIDE * 2 + fieldW + SIDE * 2;
         else
             fieldX = rightFieldStart(size) + SIDE * 2;
 
-        return {std::floor(fieldX), fieldTop, FIELD_W, fieldH};
+        return {std::floor(fieldX), fieldTop, fieldW, fieldH};
     }
 
     CBox buttonRect(Vector2D size, int btn, bool showButtons) {
@@ -301,10 +315,11 @@ namespace CDE {
         if (LEFT_SEP < rfStart) {
             const double sepTop = BEVEL + 2 + GROOVE * 2;
             const double sepH   = size.y - sepTop - SIDE;
+            const double fieldW = buttonFieldWidth(size);
             separator(cr, LEFT_SEP, sepTop, sepH, p);
             separator(cr, lfEnd, sepTop, sepH, p);
             separator(cr, rfStart, sepTop, sepH, p);
-            separator(cr, rfStart + FIELD_W + SIDE * 2, sepTop, sepH, p);
+            separator(cr, rfStart + fieldW + SIDE * 2, sepTop, sepH, p);
             separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
         }
 
@@ -328,8 +343,9 @@ namespace CDE {
 
         if (config().showButtons) {
             for (int b = 0; b < BTN_COUNT; ++b) {
-                const CBox r = buttonRect(size, b, true);
-                if (!r.w)
+                const CBox field = buttonFieldRect(size, b, true);
+                const CBox r     = buttonRect(size, b, true);
+                if (!field.w || !r.w)
                     continue;
 
                 // Hover and held both read as INSET. Motif swaps the bevel when a button
@@ -341,14 +357,19 @@ namespace CDE {
                 // reference, so this mirrors the unheld rule rather than confirming it.)
                 const SPalette bp = (hovered == b || pressed == b) ? inverted(p) : p;
 
+                // The highlight goes on the FIELD — the whole square — not on the glyph.
+                // The glyph is only 9x9 inside a square that grows with the bar, so
+                // highlighting it alone means most of the clickable area lights nothing,
+                // and the button appears to react in patches.
+                if (hovered == b || pressed == b)
+                    glyphFrame(cr, field, bp.light, bp.dark);
+
                 // The float toggle carries its own icon instead of a bare raised rect,
                 // and takes the same swap.
                 if (b == BTN_FLOAT)
                     drawFloatToggle(cr, r.x, r.y, bp);
                 else
                     glyphFrame(cr, r, bp.light, bp.dark);
-
-                // Motif's other two are bare raised rects; Motif puts no icon in them.
             }
         }
 
@@ -431,7 +452,7 @@ namespace CDE {
         cairo_t*         cr   = cairo_create(surf);
         cairo_scale(cr, scale, scale);
 
-// Same painter the title bar uses for its own ends, so the frame and the bar are the
+        // Same painter the title bar uses for its own ends, so the frame and the bar are the
         // same bands by construction. `outerIsHigh` says which end faces away from the
         // client: for the left strip that is the low end, for right and bottom the high
         // end — which is why the lit band swaps sides between them.

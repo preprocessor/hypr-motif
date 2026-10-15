@@ -8,9 +8,6 @@
 
 namespace CDE {
 
-    // Measured from examples/CDE-7.png, which is 1:1 with no scaling to undo.
-    // Reference for every number here; see AGENTS.md.
-    //
     // Vertical, top-down, for a BAR_HEIGHT of 22:
     //   rows 0-1  light   outer top bevel
     //   rows 2-3  face
@@ -61,7 +58,6 @@ namespace CDE {
     // Live corner-grab size for the current bar height.
     int cornerGrab();
 
-
     // Named for what they DO, not for Motif's usual role: the middle button carries a
     // float-toggle glyph (examples/float-toggle.png) and toggles floating, not minimize.
     // Motif's window-menu slot is where we put close, to keep the 1-left/2-right shape.
@@ -78,7 +74,8 @@ namespace CDE {
     SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active);
 
 
-    // Logical-px rect of a button's glyph box within the bar, or {} for none/hidden.
+    // Logical-px rect of a button's glyph within the bar, or {} for none/hidden. The
+    // glyphs keep their measured size; the FIELD they sit in grows with the bar.
     CBox buttonRect(Vector2D size, int btn, bool showButtons);
 
     // The clickable FIELD around that glyph — what hit-testing uses, and the hover

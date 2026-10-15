@@ -44,6 +44,17 @@ class CCdeDecoration : public IHyprWindowDecoration {
         m_barTex.reset();
     }
 
+    // Recomputes which button the cursor is over, from a GLOBAL position. Returns true
+    // if it changed, in which case the texture is already dropped and the caller only
+    // has to damage the bar.
+    //
+    // This has to be callable from OUTSIDE draw(): with nothing damaged, Hyprland never
+    // calls draw(), so a hover polled from inside it can never notice the cursor arriving
+    // — the same chicken-and-egg as the title update. main.cpp calls it from the mouse
+    // motion listener. Uses the cached bar box so the common "cursor is nowhere near this
+    // window" case is one rect test.
+    bool syncHover(const Vector2D& globalPos);
+
   private:
     bool isTop() const {
         return m_edge == DECORATION_EDGE_TOP;
@@ -105,6 +116,9 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // Button the press landed on. Kept separate from m_pressed because the action fires
     // on release, and only if the release lands on the same button.
     int         m_clickButton = CDE::BTN_NONE;
+    // The bar's global box from the last draw(). Hover is tested against this rather than
+    // recomputing outerBox() (five positioner lookups) on every mouse-move event.
+    CBox        m_cachedBar = {};
     Vector2D    m_dragStart;
 
     void        retexture(float scale);

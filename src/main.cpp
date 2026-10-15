@@ -108,6 +108,25 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     });
 
+    // Hover has to be driven from here. Hyprland sends no INPUT_TYPE_MOTION to
+    // decorations at all (the enum exists, there is no call site for it), and a poll
+    // inside draw() cannot work either: with nothing damaged, draw() is never called, so
+    // it never notices the cursor arriving. The motion event gives us the position from
+    // outside the render path; syncHover() drops the texture when it changes and we
+    // damage the bar so the next frame actually repaints it.
+    static auto PM = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& pos, Event::SCallbackInfo&) {
+        for (const auto& w : Desktop::windowState()->windows()) {
+            if (!w || !w->m_isMapped)
+                continue;
+
+            for (const auto& d : w->m_windowDecorations) {
+                auto* cde = dynamic_cast<CCdeDecoration*>(d.get());
+                if (cde && cde->syncHover(pos))
+                    cde->damageBar();
+            }
+        }
+    });
+
     // Windows that already exist are not covered by the open event.
     for (auto& w : Desktop::windowState()->windows())
         onNewWindow(w);
