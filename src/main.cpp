@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <ranges>
+#include <cstdio>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/devices/IPointer.hpp>
 #include <stdexcept>
 
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -109,15 +112,22 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     });
 
-    // Hover has to be driven from here too, for the same reason: Hyprland sends
-    // decorations no INPUT_TYPE_MOTION at all, so a poll inside draw() would never run.
-    // syncHover() drops the texture when the hovered button changes; damaging the bar is
-    // what makes the next frame repaint it. See AGENTS.md `## Button input`.
+    // Hover and the drag start have to be driven from here too, for the same reason:
+    // Hyprland sends decorations no INPUT_TYPE_MOTION at all, and a poll inside draw()
+    // would never run for a window that is not being repainted — which is the state a
+    // window is in while it waits to be dragged. syncHover() drops the texture when the
+    // hovered button changes; damaging the bar is what makes the next frame repaint it.
+    // See AGENTS.md `## Button input` and `## Dragging`.
     static auto PM = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& position, Event::SCallbackInfo&) {
         forEachCdeDecoration([&](CCdeDecoration& decoration, PHLWINDOW) {
-            if (decoration.syncHover(position))
+            if (decoration.syncDrag(position) || decoration.syncHover(position))
                 decoration.damageBar();
         });
+    });
+
+    static auto PB = Event::bus()->m_events.input.mouse.button.listen([](const IPointer::SButtonEvent& e, Event::SCallbackInfo&) {
+        FILE* f = fopen("/home/wyspr/cde-dbg.log", "a");
+        if (f) { fprintf(f, "BTN btn=%d state=%d mouse=%d mousepos=%.0f,%.0f held=%d\n", e.button, (int)e.state, (int)e.mouse, g_pInputManager->getMouseCoordsInternal().x, g_pInputManager->getMouseCoordsInternal().y, (int)g_pInputManager->hasHeldButtons()); fclose(f); }
     });
 
     // Windows that already exist are not covered by the open event.

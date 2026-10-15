@@ -13,6 +13,11 @@
 #include "chrome.hpp"
 #include "config.hpp"
 
+// How far the cursor must travel after a press on the bare bar before the window starts
+// following it. `binds:drag_threshold` defaults to 0, and dragging straight off the press
+// would float a tiled window on every click that lands on the title bar to focus it.
+static constexpr double DRAG_THRESHOLD = 3;
+
 class CCdeDecoration : public IHyprWindowDecoration {
   public:
     // `edge` is an eDecorationEdges value. Exactly one deco per edge per window.
@@ -55,6 +60,14 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // window" case is one rect test.
     bool syncHover(const Vector2D& globalPos);
 
+    // Starts the window drag once the cursor passes DRAG_THRESHOLD from the press, and
+    // ends a drag whose release landed off the window. Called from the mouse motion
+    // listener for the same reason syncHover is: Hyprland sends decorations no
+    // INPUT_TYPE_MOTION, and a poll inside draw() would never run for a window that is
+    // sitting still — which is exactly the state a window is in while waiting to be
+    // dragged. Returns true if a drag started, so the caller can damage the bar.
+    bool syncDrag(const Vector2D& globalPos);
+
   private:
     bool isTop() const {
         return m_edge == DECORATION_EDGE_TOP;
@@ -77,6 +90,16 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // clicked rather than whatever happens to be focused, and so they work under both
     // the hyprlang and the Lua config backends.
     void runButtonAction(int btn);
+
+    // Hands the window to the compositor's own drag controller, which is what makes the
+    // bar drag natively: it is the same drag a `mouse:…, movewindow` bind produces, so
+    // float-on-drag, drag_threshold, snapping and drag-into-group all behave as the user
+    // configured them. Not CWindow::moveWindowPos, which would ignore every one of those.
+    void startDrag();
+
+    // Ends a drag this decoration started. Does nothing if the compositor ended it
+    // already (the window unmapped mid-drag ends it from CWindow::onWindowRemoved).
+    void endDrag();
 
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
@@ -119,6 +142,12 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // Button the press landed on. Kept separate from m_pressed because the action fires
     // on release, and only if the release lands on the same button.
     int         m_clickButton = CDE::BTN_NONE;
+    // A press on the bare bar, waiting for the cursor to travel DRAG_THRESHOLD before the
+    // window starts moving.
+    bool        m_dragArmed = false;
+    Vector2D    m_dragOrigin = {};
+    // Whether the compositor is currently dragging THIS window on our behalf.
+    bool        m_dragging = false;
     // The bar's global box from the last draw(). Hover is tested against this rather than
     // recomputing outerBox() (five positioner lookups) on every mouse-move event.
     CBox        m_cachedBar = {};

@@ -3,6 +3,7 @@
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -182,6 +183,11 @@ bool CCdeDecoration::syncHover(const Vector2D& globalPos) {
     if (!isTop() || !windowVisible())
         return false;
 
+    // A drag owns the cursor: whatever button it crosses must not light up for the length
+    // of the drag.
+    if (m_dragArmed || m_dragging)
+        return false;
+
     int under = CDE::BTN_NONE;
     if (m_cachedBar.w > 0 && m_cachedBar.h > 0 && m_cachedBar.containsPoint(globalPos))
         under = CDE::buttonAt(m_cachedBar.size(), globalPos - m_cachedBar.pos(), CDE::config().showButtons);
@@ -191,6 +197,79 @@ bool CCdeDecoration::syncHover(const Vector2D& globalPos) {
 
     m_hovered = under;
     m_barTex.reset();
+    return true;
+}
+
+void CCdeDecoration::startDrag() {
+    const PHLWINDOW self = m_window.lock();
+    if (!self)
+        return;
+
+    m_dragging = true;
+
+    // Hover and pressed are click state, not drag state — drop them or a button the drag
+    // happens to cross stays lit until the release.
+    m_hovered     = CDE::BTN_NONE;
+    m_pressed     = CDE::BTN_NONE;
+    m_clickButton = CDE::BTN_NONE;
+    m_barTex.reset();
+
+    g_layoutManager->beginDragTarget(self->layoutTarget(), MBIND_MOVE);
+}
+
+void CCdeDecoration::endDrag() {
+    const bool owned = m_dragging;
+
+    // Cleared BEFORE ending: endDragTarget() routes back into this decoration's DRAG_END
+    // handler, and re-entering a live endDrag() would be a mess.
+    m_dragging   = false;
+    m_dragArmed  = false;
+    m_barTex.reset();
+
+    // Only if the compositor still has OUR window. It ends the drag itself when the window
+    // unmaps mid-drag (CWindow::onWindowRemoved), and ending someone else's drag — a
+    // `movewindow` bind that won the race — would cancel the user's own gesture.
+    if (!owned || !m_window)
+        return;
+
+    if (g_layoutManager->dragController()->target() == m_window->layoutTarget())
+        g_layoutManager->endDragTarget();
+}
+
+bool CCdeDecoration::syncDrag(const Vector2D& globalPos) {
+    if (!isTop() || !windowVisible())
+        return false;
+
+    // A release that never reached us — it landed off the window, where only the
+    // compositor sees it — would otherwise leave the drag running and the window trailing
+    // the cursor. The next mouse move of any kind heals it.
+    if (!g_pInputManager->hasHeldButtons() && (m_dragging || m_dragArmed)) {
+        endDrag();
+        return false;
+    }
+
+    if (!m_dragArmed)
+        return false;
+
+    // Something is already dragging (a mouse bind beat us to the press). Leave it alone
+    // and stand down — our release will disarm us.
+    if (g_layoutManager->dragController()->target()) {
+        m_dragArmed = false;
+        return false;
+    }
+
+    if (globalPos.distance(m_dragOrigin) < DRAG_THRESHOLD)
+        return false;
+
+    m_dragArmed = false;
+
+    // A fullscreen window does not move, same as under the compositor's own move bind
+    // (CKeybindManager::changeMouseBindMode skips it before we are even asked).
+    const PHLWINDOW self = m_window.lock();
+    if (!self || Fullscreen::controller()->isFullscreen(self))
+        return false;
+
+    startDrag();
     return true;
 }
 
@@ -233,7 +312,16 @@ void CCdeDecoration::ensureTextures(float scale) {
     retexture(scale);
 }
 
+#include <cstdio>
+static void dbg(const char* fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    FILE* f = fopen("/home/wyspr/cde-dbg.log", "a");
+    if (f) { vfprintf(f, fmt, ap); fclose(f); }
+    va_end(ap);
+}
+
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data) {
+    dbg("deco type=%d pos=%.0f,%.0f\n", (int)type, pos.x, pos.y);
     // Only the top edge has buttons; the frame edges are decorative for now.
     if (!isTop())
         return true;
@@ -246,10 +334,8 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     // Every rect chrome.cpp returns is bar-relative, so convert once, here.
     const Vector2D p = pos - barBoxGlobal().pos();
 
-    // chrome.cpp owns the field geometry AND the hit-test against it, so the clickable
-    // area cannot drift from the drawn one.
-    // Keep the pressed highlight in step with the click being tracked. Runs on both
-    // edges, so the button un-presses even when the release lands somewhere else.
+    // Keeps the pressed highlight in step with the click being tracked. Runs on both
+    // edges of a click, so the button un-presses even when the release lands elsewhere.
     auto syncPressed = [&] {
         if (m_clickButton != m_pressed) {
             m_pressed = m_clickButton;
@@ -258,41 +344,55 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     };
 
     switch (type) {
-        // INPUT_TYPE_BUTTON arrives on press AND release, with the event in `data`. The
-        // action fires on the RELEASE, never on the drag pair: swallowing DRAG_START stops
-        // Hyprland creating a drag target, and dragEnd() early-returns without one, so
-        // DRAG_END would never arrive at all.
+        // INPUT_TYPE_BUTTON arrives on press AND release, with the event in `data`. A
+        // click's action fires on the RELEASE, never on the press.
         case INPUT_TYPE_BUTTON: {
             const auto* ev = std::any_cast<IPointer::SButtonEvent>(&data);
             if (!ev || !ev->mouse || ev->button != BTN_LEFT)
                 return false;
 
-            if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED)
-                m_clickButton = CDE::buttonAt(size, p, buttons);
-            else {
+            // chrome.cpp owns the field geometry AND the hit-test against it, so the clickable
+            // area cannot drift from the drawn one.
+            const int hit = CDE::buttonAt(size, p, buttons);
+            dbg("  btn state=%d hit=%d size=%.0fx%.0f p=%.0f,%.0f buttons=%d\n", (int)ev->state, hit, size.x, size.y, p.x, p.y, (int)buttons);
+
+            if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                m_clickButton = hit;
+
+                // A press on the bare bar arms a drag rather than starting one; the cursor
+                // has to travel DRAG_THRESHOLD first. syncDrag() picks it up.
+                if (hit == CDE::BTN_NONE) {
+                    m_dragArmed  = true;
+                    m_dragOrigin = pos;
+                }
+            } else {
                 const int held = m_clickButton;
-                const int hit  = CDE::buttonAt(size, p, buttons);
                 if (held != CDE::BTN_NONE && held == hit)
                     runButtonAction(held);
+
+                // The release can land anywhere on the bar, so the drag ends here rather
+                // than waiting for the cursor to come back over it.
+                endDrag();
             }
 
             syncPressed();
             return false; // swallow both edges, so the click never reaches the client
         }
 
-        case INPUT_TYPE_DRAG_START: {
-            // False on a button: a press landing on a button must never start a window
-            // drag. True on the bare bar, so a user-bound `mouse:... movewindow` can
-            // still drag the window by its title bar.
-            return CDE::buttonAt(size, p, buttons) == CDE::BTN_NONE;
-        }
+        // Only a mouse `movewindow` bind gets here: it asks the window whether it wants to
+        // start the drag itself, and starts its own when the answer is no. False on the bare
+        // bar therefore *enables* that bind rather than cancelling it. True on a button, so
+        // a press landing there can never move the window.
+        case INPUT_TYPE_DRAG_START:
+            return CDE::buttonAt(size, p, buttons) != CDE::BTN_NONE;
 
-        // Reached only when a drag really started, i.e. the press missed every button.
-        // The compositor has already moved the window by now; just drop the drag state.
+        // Reached from the compositor's dragEnd() before it finishes the move it started, so
+        // false lets it complete (geometry commit, focus, drag-into-group). Ending a drag
+        // here is what the BUTTON release above does.
         case INPUT_TYPE_DRAG_END:
             m_clickButton = CDE::BTN_NONE;
             syncPressed();
-            return true;
+            return false;
 
         default: return true;
     }
