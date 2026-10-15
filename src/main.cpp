@@ -2,9 +2,6 @@
 
 #include <algorithm>
 #include <ranges>
-#include <cstdio>
-#include <hyprland/src/managers/input/InputManager.hpp>
-#include <hyprland/src/devices/IPointer.hpp>
 #include <stdexcept>
 
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -123,11 +120,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             if (decoration.syncDrag(position) || decoration.syncHover(position))
                 decoration.damageBar();
         });
-    });
-
-    static auto PB = Event::bus()->m_events.input.mouse.button.listen([](const IPointer::SButtonEvent& e, Event::SCallbackInfo&) {
-        FILE* f = fopen("/home/wyspr/cde-dbg.log", "a");
-        if (f) { fprintf(f, "BTN btn=%d state=%d mouse=%d mousepos=%.0f,%.0f held=%d\n", e.button, (int)e.state, (int)e.mouse, g_pInputManager->getMouseCoordsInternal().x, g_pInputManager->getMouseCoordsInternal().y, (int)g_pInputManager->hasHeldButtons()); fclose(f); }
     });
 
     // Windows that already exist are not covered by the open event.

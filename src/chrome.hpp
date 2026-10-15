@@ -38,6 +38,26 @@ namespace CDE {
     // Breathing room either side of the title text inside the title field.
     inline constexpr int TITLE_PADDING = 8;
 
+    // Clearance the drag rules leave between themselves and the nearest button field
+    // separator or title glyph. They mark the middle of the bar as the drag area, so they
+    // must not read as part of the text or of the controls.
+    inline constexpr int DRAG_RULE_GAP = 10;
+
+    // The drag rules are three light lines stacked in the field band, each with its dark
+    // shadow one pixel right and one row below.
+    inline constexpr int DRAG_RULE_LINES = 4;
+
+    // Shadow offset, and the face row between one line's shadow and the next line's. The gap is
+    // fixed: it is the measured one, and growing it would spread the lines apart instead of
+    // leaving the clearance above and below them. The clearance itself is derived from the
+    // field band in drawDragRules — 3px at the reference bar.
+    inline constexpr int DRAG_RULE_SHADOW_DX = 1;
+    inline constexpr int DRAG_RULE_STACK_GAP = 1;
+
+    // A drag rule shorter than this is a stub that looks like a rendering fault, so it is
+    // dropped and the title keeps the space to itself.
+    inline constexpr int DRAG_RULE_MIN = 4;
+
     // Hard shadow under the title text, from examples/title.png: a copy of the string
     // offset one pixel down and right, drawn before the text. No blur and no alpha ramp —
     // the reference's shadow pixels are as solid as the glyphs'.

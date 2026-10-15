@@ -410,9 +410,12 @@ namespace CDE {
     // Both axes are floored: with antialiasing off cairo rounds each glyph to whole pixels
     // independently, so a fractional origin spaces the stems unevenly and, with the shadow
     // underneath, reads as text drawn twice.
-    void drawTitle(cairo_t* cr, Vector2D size, const std::string& title, int fontSize, const SPalette& p) {
+    //
+    // Returns the ink box so the caller can lay the drag rules out around the text rather
+    // than re-deriving the metrics (which would have to be redone after any change here).
+    CBox drawTitle(cairo_t* cr, Vector2D size, const std::string& title, int fontSize, const SPalette& p) {
         if (title.empty() || fontSize <= 0)
-            return;
+            return {};
 
         const CBox field = titleFieldRect(size);
 
@@ -447,6 +450,60 @@ namespace CDE {
         cairo_move_to(cr, left, baseline);
         cairo_set_source_rgb(cr, p.title.r, p.title.g, p.title.b);
         cairo_show_text(cr, title.c_str());
+
+        return {std::floor(left + textExtents.x_bearing), std::floor(baseline - fontExtents.ascent), std::ceil(textExtents.width), std::ceil(fontExtents.height)};
+    }
+
+    // The horizontal rules marking the middle of the bar as the drag area, one group either
+    // side of the title. Each is DRAG_RULE_LINES light lines stacked in the field band, every
+    // one carrying a dark shadow a pixel right and a row below — the same pairing the title
+    // text and the separators use, so a line reads as raised rather than as a seam.
+    //
+    // Each rule fills whatever is left of the title field once DRAG_RULE_GAP is left clear
+    // at both ends, so the 10px gap is what fixes their length: a long title pulls them in
+    // rather than letting them run under the text.
+    void drawDragRules(cairo_t* cr, Vector2D size, const CBox& titleBox, const SPalette& p) {
+        if (titleBox.w <= 0)
+            return;
+
+        const double fieldTop = FIELD_TOP;
+        const double fieldH   = size.y - fieldTop - SIDE;
+        const double painted  = DRAG_RULE_LINES * (SIDE * 2); // a light row plus its shadow
+        const double slack    = fieldH - painted;
+
+        // Too little band to hold the stack plus a face row above and below it: no rules at
+        // all rather than a clipped one.
+        if (slack < DRAG_RULE_LINES * 2)
+            return;
+
+        // One face row between the lines, and the whole stack centred in the band: what is
+        // left over after those fixed gaps is the clearance above and below, which is 3px at
+        // the reference bar and grows with the bar. Distributing the slack between the lines
+        // instead would push them apart on a tall bar and pin them to the top.
+        const double edgeGap = std::floor((slack - DRAG_RULE_STACK_GAP * (DRAG_RULE_LINES - 1)) / 2);
+        if (edgeGap < 1)
+            return;
+
+        const double fieldStart = leftFieldEnd(size) + DRAG_RULE_GAP;
+        const double fieldEnd   = rightFieldStart(size) - DRAG_RULE_GAP;
+        const double textStart  = titleBox.x - DRAG_RULE_GAP;
+        const double textEnd    = titleBox.x + titleBox.w + DRAG_RULE_GAP;
+
+        // A rule narrower than the minimum is a stub that reads as a rendering fault, so
+        // it is dropped and the title keeps the space to itself.
+        auto rule = [&](double x, double w) {
+            if (w < DRAG_RULE_MIN)
+                return;
+
+            for (int line = 0; line < DRAG_RULE_LINES; ++line) {
+                const double y = fieldTop + edgeGap + line * (SIDE * 2 + DRAG_RULE_STACK_GAP);
+                fill(cr, x, y, w, SIDE, p.light);
+                fill(cr, x + DRAG_RULE_SHADOW_DX, y + SIDE, w, SIDE, p.dark);
+            }
+        };
+
+        rule(fieldStart, textStart - fieldStart);
+        rule(textEnd, fieldEnd - textEnd);
     }
 
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active) {
@@ -463,7 +520,7 @@ namespace CDE {
         drawFieldSeparators(cr, size, p);
         drawCornerGrabRules(cr, size, p);
         drawButtons(cr, size, hovered, pressed, p);
-        drawTitle(cr, size, title, fontSize, p);
+        drawDragRules(cr, size, drawTitle(cr, size, title, fontSize, p), p);
 
         cairo_destroy(cr);
 

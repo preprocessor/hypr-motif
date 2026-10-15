@@ -62,12 +62,30 @@ compositor keeps the old inode mapped and silently runs stale code.
 
 **Testing clicks.** There is no `xdotool`/`ydotool`/`wlrctl` on this box, and `hyprctl
 dispatch movecursor 37,36` fails under a Lua config (`hl.dispatch(movecursor 37 36)` is a
-Lua syntax error). Two things that do work:
+Lua syntax error). What works:
 
 ```sh
 grim /tmp/opencode/shot.png        # screenshot, then read pixels with magick
-# real clicks: XTest via ctypes against the 64-bit libXtst in the store
 ```
+
+**XTest does NOT reach Hyprland.** It drives the XWayland core pointer, which a native
+Wayland compositor never reads — a "real click" via libXtst moves the cursor and produces
+no `input.mouse.button` event at all. Measured, not assumed. A **`/dev/uinput` virtual
+mouse does work**: libinput enumerates it as a pointer (`hyprctl devices` lists it while
+the fd is open) and its events reach decorations. Use a **relative** device — an absolute
+one maps erratically, and the cursor keeps drifting after a press. Two details the kernel
+on this box insists on, both of which surface as `EINVAL` on the `uinput_user_dev` write:
+
+- the struct is exactly **92 + 4 × 256 bytes**; more is rejected. `struct.pack('%di' % 64, …)`
+  is 256 bytes (`'%di' % 64` is `'64i'`, *not* `'di' * 64`), and there are **four** abs
+  arrays, not five.
+- the device has to stay open for ~3s before the compositor enumerates it.
+
+Accel makes an open-loop pixel count useless, so drive it closed-loop: move in small
+steps, read `hyprctl cursorpos`, correct by the error, repeat until it is within a pixel
+or two. `/tmp/opencode/relmouse.py` does this (`click` / `move` / `drag`). Note
+`hyprctl cursorpos` is the *animated* position and lags; the compositor's internal one is
+what hit-testing uses.
 
 ```lua
 -- moving the cursor, the Lua form of the old dispatcher:
@@ -140,6 +158,10 @@ Verified against live pixels, not arithmetic. Renders today:
 - Fielded layout, five separators at bar-rel 4, 21, `width-40`, `width-23`, `width-6`.
 - Title drawn **into the bar texture** (gotcha 4), centred within the title field.
   **Aliased, with a hard 1px down-right shadow** — see `## Title text style`.
+- **Two groups of three drag rules** flank the title, 10px clear of it and of the button
+  fields, light with a dark row under each. See `## Dragging`.
+- **The bar drags the window**, natively and with no mouse binds required — see
+  `## Dragging`.
 - Focused windows use a separate palette — see `## Active-window palette`.
 - **All three buttons act**, verified by real clicks against a live session: close →
   `Actions::closeWindow`, float toggle → `Actions::floatWindow(TOGGLE)`,
@@ -303,6 +325,10 @@ Separators are 1px dark over 1px light — that pairing is what makes the fields
 three panels rather than one bar. Buttons are bare raised glyph boxes on the face; Motif
 draws no button *box* around the title-bar controls.
 
+The title field carries two more marks that Motif does not have: the **drag rules** that
+show the bar is draggable (`## Dragging`). They are ours, not measured from a reference, so
+they are the one piece of the bar with no example image behind them.
+
 **The frame and the bar share one bevel painter** (`bevelBands`), because the bar spans the
 full window width and the side strips the full height, so they **overlap in the corners** —
 two separate bevels would show a join. `outerIsHigh` says which end faces away from the
@@ -392,6 +418,56 @@ With the dark palette (`color_face #333333`, `color_light #555555`, `color_dark 
 the rendered bar contains exactly four colours — face, light, dark and the title — which
 is the check to run after touching this code. If greys appear between the glyph edges,
 antialiasing came back.
+
+## Dragging
+
+The bar drags its window with **no mouse bind required**, and the drag is the compositor's
+own: `g_layoutManager->beginDragTarget(target, MBIND_MOVE)` / `endDragTarget()`. That is the
+same call a `mouse:…, movewindow` bind makes, so `binds:drag_threshold`, float-on-drag,
+snapping and drag-into-group behave exactly as the user configured them. Do not reimplement
+it with `CWindow::moveWindowPos` — that ignores every one of those.
+
+**A press arms, motion starts it.** `INPUT_TYPE_BUTTON`'s press only records
+`m_dragArmed` + `m_dragOrigin`; `syncDrag()` starts the drag once the cursor passes
+`DRAG_THRESHOLD` (3px). Dragging straight off the press would be simpler and wrong:
+`binds:drag_threshold` **defaults to 0**, so `dragBegin` would float a tiled window on every
+click that lands on the title bar to focus it.
+
+`syncDrag()` is called from `main.cpp`'s `input.mouse.move` listener, for the same reason
+hover is: Hyprland sends decorations no `INPUT_TYPE_MOTION`, and a poll inside `draw()`
+never runs for a window that is sitting still — which is exactly the state a window is in
+while it waits to be dragged. The same listener is where a drag whose **release landed off
+the window** gets ended: nothing else sees that release, so `hasHeldButtons()` is the
+heal, on the next mouse move of any kind.
+
+**`INPUT_TYPE_DRAG_START` returning `true` CANCELS Hyprland's drag, it does not start
+one.** `CKeybindManager::changeMouseBindMode` (the `movewindow` dispatcher) asks the window
+via `checkInputOnDecos(DRAG_START)` and calls `beginDragTarget` only when the answer is
+*false*. So `onInputOnDeco` returns `true` only on a **button** — that is what stops a press
+on a button from moving the window — and `false` everywhere else, which both lets a user's
+`movewindow` bind work and hands our own path the pointer. (The pre-drag code had this
+inverted, and a bound `mouse:272, movewindow` silently did nothing on the bar.)
+
+`INPUT_TYPE_DRAG_END` returns **false**: it is reached from `CDragStateController::dragEnd()`
+*before* it finishes the move, and returning true there skips the geometry commit, the focus
+and the group merge.
+
+The **drag rules** mark the draggable area: two groups of `DRAG_RULE_LINES` (4) horizontal
+lines flanking the title, each line a light row with a dark shadow one pixel right and one
+row below. They clear the title's ink box and the button field separators by
+`DRAG_RULE_GAP` (10px) and fill whatever is left of the title field, so a long title pulls
+them in rather than letting them run under the text; a gap under `DRAG_RULE_MIN` (4px)
+drops the rule instead of drawing a stub. `drawTitle` returns the ink box for this —
+re-deriving the font metrics in a second place is how they would drift.
+
+Vertically the lines sit inside the **field band** (not the bar's outer rows — that band
+starts below the groove) with one face row between them (`DRAG_RULE_STACK_GAP`), and what
+the band has left over is the clearance above and below: `edgeGap`, which is **2px at the
+22px reference bar and grows with the bar** (4/4 on a 26px one). Sharing the leftover with
+the internal gaps instead was tried and rejected — it spreads the lines apart on a tall bar
+and pins them against the top of the band, which reads as misplaced rather than centred. The
+minimum bar that fits them at all is 23px (`slack ≥ DRAG_RULE_LINES * 2`, one face row above
+and below); below that they are dropped.
 
 ## Bar height
 
@@ -578,11 +654,10 @@ from leaving the glyph stuck in its inverted palette.
 
 **Act on `INPUT_TYPE_BUTTON`'s release, never on `DRAG_END`.** `BUTTON` arrives on press
 *and* release (`processMouseDownNormal`), carrying the event in `data` — read
-`state`/`button` from it or a click cannot be told from a press. `DRAG_END` is a trap: a
-`DRAG_START` we swallow stops Hyprland creating a drag target, and
-`CDragStateController::dragEnd()` early-returns without one, so `DRAG_END` never arrives.
-Keep `DRAG_START` returning true only on the bare bar, so a user-bound `mouse:… movewindow`
-can still drag by the title bar.
+`state`/`button` from it or a click cannot be told from a press. The drag is ended from the
+same release: a `DRAG_START` we swallow would stop Hyprland creating a drag target at all,
+and `CDragStateController::dragEnd()` early-returns without one, so `DRAG_END` would never
+arrive. See `## Dragging` for what each of the two returns is doing.
 
 **Call `Config::Actions::` directly; do not go through `hyprctl dispatch`.** Under a Lua
 config `hyprctl dispatch <name> <args>` is eval'd as `hl.dispatch(name args)`, which is a
@@ -606,9 +681,10 @@ in `SPalette` any more. Measured at 1x: hovering changes exactly the field's 176
 
 **Buttons only fire when nothing else consumes the press.** `processMouseDownNormal`
 returns before `checkInputOnDecos(INPUT_TYPE_BUTTON)` if a mouse bind matched the press.
-This session has no mouse binds, so it works here; a user with
-`bindm = …, mouse:272, movewindow` needs `binds:pass_mouse_when_bound = true` or their
-bar buttons go dead.
+This session now binds `mouse:272`/`mouse:273` to Lua, so it runs with
+`binds:pass_mouse_when_bound = true`; a user with
+`bindm = …, mouse:272, movewindow` needs the same or their bar buttons go dead. Dragging is
+subject to the same gate — with the option off, the bar does not drag either.
 
 ## API notes
 

@@ -312,16 +312,7 @@ void CCdeDecoration::ensureTextures(float scale) {
     retexture(scale);
 }
 
-#include <cstdio>
-static void dbg(const char* fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    FILE* f = fopen("/home/wyspr/cde-dbg.log", "a");
-    if (f) { vfprintf(f, fmt, ap); fclose(f); }
-    va_end(ap);
-}
-
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data) {
-    dbg("deco type=%d pos=%.0f,%.0f\n", (int)type, pos.x, pos.y);
     // Only the top edge has buttons; the frame edges are decorative for now.
     if (!isTop())
         return true;
@@ -354,7 +345,6 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
             // chrome.cpp owns the field geometry AND the hit-test against it, so the clickable
             // area cannot drift from the drawn one.
             const int hit = CDE::buttonAt(size, p, buttons);
-            dbg("  btn state=%d hit=%d size=%.0fx%.0f p=%.0f,%.0f buttons=%d\n", (int)ev->state, hit, size.x, size.y, p.x, p.y, (int)buttons);
 
             if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED) {
                 m_clickButton = hit;
