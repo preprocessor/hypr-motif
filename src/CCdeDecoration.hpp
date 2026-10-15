@@ -94,7 +94,10 @@ class CCdeDecoration : public IHyprWindowDecoration {
         return m_window && m_window->m_isMapped && m_assigned.w && m_assigned.h;
     }
 
-    // The bar is only re-rasterised when the title, scale, focus or button state changes.
+    // Whether the cached texture still matches its cache key.
+    bool textureIsCurrent(float scale) const;
+
+    // Re-rasterises when the cache key no longer matches, and refreshes hover meanwhile.
     void ensureTextures(float scale);
 
     PHLWINDOWREF m_window;
@@ -119,7 +122,6 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // The bar's global box from the last draw(). Hover is tested against this rather than
     // recomputing outerBox() (five positioner lookups) on every mouse-move event.
     CBox        m_cachedBar = {};
-    Vector2D    m_dragStart;
 
     void        retexture(float scale);
 };

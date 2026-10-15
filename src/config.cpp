@@ -11,7 +11,7 @@ using namespace Hyprutils::Memory;
 namespace {
 
     SP<Config::Values::CIntValue>   barHeight, titleFontSize;
-    SP<Config::Values::CColorValue> face, light, dark, highlight, title, titleShadow;
+    SP<Config::Values::CColorValue> face, light, dark, title, titleShadow;
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
     SP<Config::Values::CBoolValue>  showButtons;
 
@@ -31,7 +31,6 @@ namespace CDE {
         face        = makeShared<Config::Values::CColorValue>("plugin:cde:color_face", "Title bar face colour", HEX(0xff999999));
         light       = makeShared<Config::Values::CColorValue>("plugin:cde:color_light", "Bevel highlight colour", HEX(0xffd1d1d1));
         dark        = makeShared<Config::Values::CColorValue>("plugin:cde:color_dark", "Bevel shadow colour", HEX(0xff4e4e4e));
-        highlight   = makeShared<Config::Values::CColorValue>("plugin:cde:color_highlight", "Highlight along the bar's bottom edge", HEX(0xffffffff));
         title       = makeShared<Config::Values::CColorValue>("plugin:cde:color_title", "Title text colour (inactive window)", HEX(0xffb0b0b0));
         titleShadow = makeShared<Config::Values::CColorValue>("plugin:cde:color_title_shadow", "Title text 1px drop shadow", HEX(0xff000000));
 
@@ -47,7 +46,6 @@ namespace CDE {
         HyprlandAPI::addConfigValueV2(h, face);
         HyprlandAPI::addConfigValueV2(h, light);
         HyprlandAPI::addConfigValueV2(h, dark);
-        HyprlandAPI::addConfigValueV2(h, highlight);
         HyprlandAPI::addConfigValueV2(h, title);
         HyprlandAPI::addConfigValueV2(h, titleShadow);
         HyprlandAPI::addConfigValueV2(h, faceActive);
@@ -69,8 +67,6 @@ namespace CDE {
             c.light = CHyprColor(light->value());
         if (dark)
             c.dark = CHyprColor(dark->value());
-        if (highlight)
-            c.highlight = CHyprColor(highlight->value());
         if (title)
             c.title = CHyprColor(title->value());
         if (titleShadow)

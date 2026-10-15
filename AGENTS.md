@@ -9,6 +9,40 @@ into, and the three buttons. Drawn **procedurally with Cairo** at runtime; there
 image assets, and there should not be. The chrome is simple 3D bevels; drawing it beats
 slicing pixels out of `example.png` (itself 2x-scaled and shadowed).
 
+## Code style
+
+Human-readable and self-documenting beats clever. The rules that actually apply here:
+
+- **Name every number that is not obviously local.** A magic `2` or `BEVEL + 2 + GROOVE * 2`
+  in a drawing call is a bug waiting to happen. `FIELD_TOP`, `CLOSE_GLYPH_W`, `TITLE_PADDING`
+  and the rest live in `chrome.hpp`; add one rather than inlining a second use.
+- **One idea per function.** `renderBar` used to be ~150 lines doing six jobs; it is now a
+  sequence of `drawBarBackground` / `drawFieldSeparators` / `drawCornerGrabRules` /
+  `drawButtons` / `drawTitle`. Split when a function needs a comment to introduce each
+  section.
+- **Comments explain WHY, not WHAT.** Keep them where there is a trap that will bite the
+  next reader — an ordering that must not change, an API that looks like it does something
+  else, a measured number that looks arbitrary. Two or three lines naming the invariant is
+  enough. The long derivations belong in this file; link to the section instead of
+  repeating it.
+- **Stale comments are worse than none.** When a measurement changes, fix the comment that
+  quotes it — several here once described glyph sizes the code had long since changed.
+- **Do not compress a boolean or an aggregate initializer onto one line.** A six-term cache
+  key is unreadable inline; give it a name (`textureIsCurrent`) and a term per line.
+- **Helpers return what they say they return.** Every function returning a `CBox` ends in
+  `Rect`, so `buttonFieldRect` (the clickable area), `buttonGlyphRect` (the artwork) and
+  `titleFieldRect` are distinguishable at a call site.
+- **Delete dead code rather than commenting it.** `FIELD_W`, `CORNER_GRAB_REF`,
+  `m_dragStart` and the never-drawn `color_highlight` were all removed once the sizes they
+  referenced became derived; a constant that nothing reads is a lie about the design.
+
+**Refactors must be pixel-neutral.** `renderBar`/`renderBorder` are the only things that
+decide what a pixel looks like, so reorganising them is safe *only* if verified: screenshot
+the bars of every visible window at two or three `bar_height` values with the old build
+loaded, swap to the new build, and diff the bar regions. That check earned its keep — it
+caught a groove row moving by one pixel and a grab-rule span losing a row, both introduced
+while "just renaming a constant". See `## Verification`.
+
 ## Commands
 
 ```sh

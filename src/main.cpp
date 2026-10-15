@@ -45,6 +45,22 @@ static void onNewWindow(PHLWINDOW window) {
     }
 }
 
+// Runs `fn` against every one of our decorations on every mapped window. The event
+// listeners below all need the same walk, and each decoration has to be narrowed back
+// from IHyprWindowDecoration to ours before use.
+template <typename Fn>
+static void forEachCdeDecoration(Fn&& fn) {
+    for (const auto& window : Desktop::windowState()->windows()) {
+        if (!window || !window->m_isMapped)
+            continue;
+
+        for (const auto& decoration : window->m_windowDecorations) {
+            if (auto* cde = dynamic_cast<CCdeDecoration*>(decoration.get()))
+                fn(*cde, window);
+        }
+    }
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
@@ -70,61 +86,38 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto PR = Event::bus()->m_events.config.reloaded.listen([] {
         CDE::bumpGeneration();
 
-        for (const auto& w : Desktop::windowState()->windows()) {
-            if (!w || !w->m_isMapped)
-                continue;
-
-            for (const auto& d : w->m_windowDecorations) {
-                auto* cde = dynamic_cast<CCdeDecoration*>(d.get());
-                if (!cde)
-                    continue;
-
-                cde->invalidate();
-                g_pDecorationPositioner->onWindowUpdate(w);
-            }
-        }
+        forEachCdeDecoration([](CCdeDecoration& decoration, PHLWINDOW window) {
+            decoration.invalidate();
+            g_pDecorationPositioner->onWindowUpdate(window);
+        });
     });
 
-    // A title change has to be handled from HERE, not from draw(). Nothing damages a
-    // decoration when only its text changes (CWindow::onUpdateMeta posts events and
-    // calls updateToplevel, nothing else), and Hyprland only calls a decoration's
-    // draw() when that decoration's region is being repainted — so with no damage the
-    // bar is never redrawn, and draw() never gets the chance to notice the title
-    // changed. Damage the bar here and the next frame picks the new title up.
-    //
-    // Without this the title only refreshes when something unrelated (a resize, the
-    // zoom effect, a workspace change) happens to damage the same pixels.
-    static auto PT = Event::bus()->m_events.window.title.listen([](PHLWINDOW w) {
-        if (!w)
+    // A title change must be handled HERE, not from draw(): nothing damages a decoration
+    // when only its text changes, and Hyprland only calls draw() on a decoration that is
+    // being repainted — so with no damage draw() never runs and never notices the new
+    // title. Without this the title refreshes only when a resize or the zoom effect
+    // happens to damage the same pixels. See AGENTS.md `## Title text style`.
+    static auto PT = Event::bus()->m_events.window.title.listen([](PHLWINDOW window) {
+        if (!window)
             return;
 
-        for (const auto& d : w->m_windowDecorations) {
-            auto* cde = dynamic_cast<CCdeDecoration*>(d.get());
-            if (!cde)
-                continue;
-
-            cde->invalidate();
-            cde->damageBar();
+        for (const auto& decoration : window->m_windowDecorations) {
+            if (auto* cde = dynamic_cast<CCdeDecoration*>(decoration.get())) {
+                cde->invalidate();
+                cde->damageBar();
+            }
         }
     });
 
-    // Hover has to be driven from here. Hyprland sends no INPUT_TYPE_MOTION to
-    // decorations at all (the enum exists, there is no call site for it), and a poll
-    // inside draw() cannot work either: with nothing damaged, draw() is never called, so
-    // it never notices the cursor arriving. The motion event gives us the position from
-    // outside the render path; syncHover() drops the texture when it changes and we
-    // damage the bar so the next frame actually repaints it.
-    static auto PM = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& pos, Event::SCallbackInfo&) {
-        for (const auto& w : Desktop::windowState()->windows()) {
-            if (!w || !w->m_isMapped)
-                continue;
-
-            for (const auto& d : w->m_windowDecorations) {
-                auto* cde = dynamic_cast<CCdeDecoration*>(d.get());
-                if (cde && cde->syncHover(pos))
-                    cde->damageBar();
-            }
-        }
+    // Hover has to be driven from here too, for the same reason: Hyprland sends
+    // decorations no INPUT_TYPE_MOTION at all, so a poll inside draw() would never run.
+    // syncHover() drops the texture when the hovered button changes; damaging the bar is
+    // what makes the next frame repaint it. See AGENTS.md `## Button input`.
+    static auto PM = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& position, Event::SCallbackInfo&) {
+        forEachCdeDecoration([&](CCdeDecoration& decoration, PHLWINDOW) {
+            if (decoration.syncHover(position))
+                decoration.damageBar();
+        });
     });
 
     // Windows that already exist are not covered by the open event.

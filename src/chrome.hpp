@@ -22,12 +22,25 @@ namespace CDE {
     inline constexpr int BEVEL       = 2; // outer top bevel thickness
     inline constexpr int GROOVE      = 1; // dark+light groove below the bevel
     inline constexpr int SIDE        = 1; // separator is dark+light, this is each
-    inline constexpr int FIELD_W     = 15; // width of a button field
-    inline constexpr int FLOAT_GLYPH = 9; // float-toggle icon, from examples/float-toggle.png
+
+    // Top of the band the fields, glyphs and title live in: everything above the groove
+    // (bevel, plus its two face rows, plus the groove itself). The one number that says
+    // "below the decorative part of the bar".
+    inline constexpr int FIELD_TOP = BEVEL + 2 + GROOVE * 2;
+
+    // Glyph sizes, all measured from the references. These do NOT scale with the bar — the
+    // field they sit in grows, the artwork inside it keeps its measured size.
+    inline constexpr int CLOSE_GLYPH_W = 9;  // left (window menu) slot in CDE-7.png
+    inline constexpr int CLOSE_GLYPH_H = 4;
+    inline constexpr int FLOAT_GLYPH   = 9;  // examples/float-toggle.png
+    inline constexpr int MAX_GLYPH     = 11; // 9x9 in CDE-7.png, enlarged by request
+
+    // Breathing room either side of the title text inside the title field.
+    inline constexpr int TITLE_PADDING = 8;
 
     // Hard shadow under the title text, from examples/title.png: a copy of the string
-    // offset one pixel down and right, drawn in the bevel's dark colour before the text.
-    // No blur and no alpha ramp — the reference's shadow pixels are as solid as the glyphs.
+    // offset one pixel down and right, drawn before the text. No blur and no alpha ramp —
+    // the reference's shadow pixels are as solid as the glyphs'.
     inline constexpr int TITLE_SHADOW_DX = 1;
     inline constexpr int TITLE_SHADOW_DY = 1;
 
@@ -43,17 +56,6 @@ namespace CDE {
     inline constexpr int BORDER      = 5;
     inline constexpr int FACE_BAND  = 2; // grey face between the two bevels
 
-    // CDE marks a square resize grip at each corner, delimited by separator lines.
-    // Measured from CDE-7.png: with a 22px bar the vertical rule sits at bar-rel 21 and
-    // width-23, the horizontal 21px up from the bottom edge — and new-standard.png gives
-    // the confirming second data point (24 with a 25px bar). Both are BAR_HEIGHT - 1, so
-    // the grab is DERIVED from the configured bar height rather than fixed; the constant
-    // below is only the measured value for the default bar, kept as the reference.
-    //
-    // This is the "corner accent": it scales with the bar, and it has to, because it is
-    // measured along the bar's own height — on the side and bottom frames the same
-    // distance marks the same square, so one value drives all four corners.
-    inline constexpr int CORNER_GRAB_REF = 21;
 
     // Live corner-grab size for the current bar height.
     int cornerGrab();
@@ -75,8 +77,8 @@ namespace CDE {
 
 
     // Logical-px rect of a button's glyph within the bar, or {} for none/hidden. The
-    // glyphs keep their measured size; the FIELD they sit in grows with the bar.
-    CBox buttonRect(Vector2D size, int btn, bool showButtons);
+    // glyphs keep their measured size whatever the bar height; the FIELD they sit in grows.
+    CBox buttonGlyphRect(Vector2D size, int btn, bool showButtons);
 
     // The clickable FIELD around that glyph — what hit-testing uses, and the hover
     // highlight. Aiming at the glyph alone is a 9x4px target on close and feels spotty.
@@ -87,7 +89,7 @@ namespace CDE {
     int  buttonAt(Vector2D size, const Vector2D& p, bool showButtons);
 
     // The flexible region between the left button field and the right pair.
-    CBox titleField(Vector2D size);
+    CBox titleFieldRect(Vector2D size);
 
     // x of the left field's trailing separator and the right pair's leading one.
     double leftFieldEnd(Vector2D size);

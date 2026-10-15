@@ -13,7 +13,6 @@ namespace CDE {
         CHyprColor face           = {0.600, 0.600, 0.600, 1};
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
         CHyprColor dark           = {0.306, 0.306, 0.306, 1};
-        CHyprColor highlight      = {1.000, 1.000, 1.000, 1};
         // Unfocused titles are grey so the focused one, which is white, stands out —
         // focus is then readable from the bar alone at a glance.
         CHyprColor title          = {0.690, 0.690, 0.690, 1}; // #b0b0b0

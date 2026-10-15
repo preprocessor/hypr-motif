@@ -66,12 +66,11 @@ CBox CCdeDecoration::outerBox() const {
     const CBox   leftSib  = siblingBox("CDE:left");
     const CBox   rightSib = siblingBox("CDE:right");
 
-    // Take the outer span from the side decorations rather than deriving it from `own`.
-    // `own` is NOT the same rectangle for every edge: for the top it is the client box,
-    // but for the left it already starts at the window's outer edge. Re-expanding a
-    // uniform `own.x - BORDER` therefore shifts the side frames a whole border further
-    // out than the client, leaving a gap of bare wallpaper between frame and client.
-    // The reserved boxes are positioned by the compositor, so read them directly.
+    // The outer span comes from the SIBLING decorations, never from our own box. `own` is
+    // a different rectangle per edge — for the top it is the client box, for the left it
+    // already starts at the window's outer edge — so re-expanding it uniformly pushes the
+    // side frames a border further out than the client and leaves bare wallpaper between
+    // them. The compositor positions those boxes, so we read them directly.
     const double winX      = leftSib.w  > 0 ? leftSib.x : own.x;
     const double winRight  = rightSib.w > 0 ? rightSib.x + rightSib.w : own.x + own.w;
     const double winY      = topSib.h  > 0 ? topSib.y : own.y;
@@ -98,19 +97,17 @@ void CCdeDecoration::damageEntire() {
     damageBar();
 }
 
-// Hyprland NEVER damages a plugin decoration's region on the plugin's behalf: on a title
-// change CWindow::onUpdateMeta only posts events and calls updateToplevel() — nothing
-// touches the decoration box. The render pass is then culled and the bar keeps showing
-// the old text until something unrelated (a resize, a zoom, a workspace change) damages
-// that area, which is exactly the "title only updates when I resize" bug. Damaging it
-// ourselves is the fix, and it is cheap: it only happens when the texture actually
-// changed, so the steady state still culls cleanly.
+// Hyprland never damages a plugin decoration on the plugin's behalf — not on a title
+// change, and not for anything else that only changes our own contents. Without a damage
+// the render pass is culled and the bar keeps showing stale pixels until something
+// unrelated (a resize, the zoom effect) happens to damage the same area. See AGENTS.md
+// `## Button input` and `## Title text style`.
 void CCdeDecoration::damageBar() {
     if (!windowVisible())
         return;
 
-    // Expand by 1px: the compositor's damage is inclusive of edges, and a one-pixel
-    // shortfall shows as a stale sliver along the bar's bottom or right edge.
+    // Expanded by 1px on each side: a shortfall shows as a stale sliver along the bar's
+    // bottom or right edge.
     CBox box = barBoxGlobal();
     box.x -= 1;
     box.y -= 1;
@@ -143,14 +140,13 @@ CBox CCdeDecoration::barBoxGlobal() const {
 }
 
 void CCdeDecoration::runButtonAction(int btn) {
-    // Actions take the window explicitly: the click may land on the bar of a window that
-    // is not the focused one, and a global dispatcher would act on the wrong window.
+    // The window is passed explicitly: the click may land on the bar of a window that is
+    // not the focused one, and a global dispatcher would act on the wrong window.
     //
-    // Deliberately NOT going through `HyprlandAPI::invokeHyprctlCommand("dispatch", ...)`:
-    // under a Lua config `hyprctl dispatch <name> <args>` is eval'd as
-    // `hl.dispatch(name args)`, which is a syntax error for every classic dispatcher name
-    // (measured: `hyprctl dispatch exec true` → "')' expected near 'true'"). The Actions
-    // API is called in-process and needs no config-type branch.
+    // Deliberately NOT routed through hyprctl: under a Lua config
+    // `hyprctl dispatch <name> <args>` is eval'd as `hl.dispatch(name args)`, a syntax
+    // error for every classic dispatcher name. These are called in-process, so they work
+    // under both config backends.
     const PHLWINDOW self = m_window.lock();
 
     switch (btn) {
@@ -198,18 +194,29 @@ bool CCdeDecoration::syncHover(const Vector2D& globalPos) {
     return true;
 }
 
+// True when the cached texture still matches everything that goes into it. Anything
+// that changes the pixels has to be listed here or the bar keeps showing a stale raster.
+bool CCdeDecoration::textureIsCurrent(float scale) const {
+    if (!m_barTex)
+        return false;
+
+    const bool sameScale   = m_lastScale == scale;
+    const bool sameTitle   = m_lastTitle == m_window->m_title;
+    const bool sameConfig  = m_generation == CDE::generation();
+    const bool sameSize    = m_lastSize == outerBox().size();
+    const bool sameFocused = m_lastFocused == (isActive() ? 1 : 0);
+
+    return sameScale && sameTitle && sameConfig && sameSize && sameFocused;
+}
+
 void CCdeDecoration::ensureTextures(float scale) {
-    // Hyprland 0.56.2 has NO call site for INPUT_TYPE_MOTION — the enum value exists but
-    // nothing ever sends it, so hover cannot arrive as an event on the decoration itself.
-    // main.cpp drives it from the mouse motion listener via syncHover(); this poll is the
-    // belt-and-braces path for when that event is missed.
+    // main.cpp drives hover from the mouse motion listener (Hyprland sends decorations no
+    // INPUT_TYPE_MOTION at all). This poll is the fallback for when that event is missed.
     if (isTop() && windowVisible() && g_pInputManager) {
         syncHover(g_pInputManager->getMouseCoordsInternal());
 
-        // A press whose release never arrives (drag off the bar, window moved under the
-        // cursor, button released outside the decoration) would otherwise leave the glyph
-        // stuck in its inverted "pressed" palette forever. Dropping it here is what keeps
-        // the icon stable.
+        // A press whose release never arrived (dragged off the bar, or released outside
+        // the decoration) would otherwise leave the glyph stuck in its pressed palette.
         if (m_clickButton != CDE::BTN_NONE && m_hovered != m_clickButton) {
             m_clickButton = CDE::BTN_NONE;
             m_pressed     = CDE::BTN_NONE;
@@ -217,10 +224,10 @@ void CCdeDecoration::ensureTextures(float scale) {
         }
     }
 
-    // Size is part of the cache key. The four edges are positioned independently and a
-    // sibling can be repositioned after we raster, which would otherwise leave a
-    // stale texture stretched over the new box — e.g. a frame band one pixel thin.
-    if (m_barTex && m_lastScale == scale && m_lastTitle == m_window->m_title && m_generation == CDE::generation() && m_lastSize == outerBox().size() && m_lastFocused == (isActive() ? 1 : 0))
+    // Size is part of the cache key: the four edges are positioned independently, so a
+    // sibling can be repositioned after we raster and leave a stale texture stretched
+    // over the new box — a frame band one pixel thin, for instance.
+    if (textureIsCurrent(scale))
         return;
 
     retexture(scale);
@@ -234,18 +241,13 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     const Vector2D size    = outerBox().size(); // match the widened bar the glyphs were drawn into
     const bool     buttons = CDE::config().showButtons;
 
-    // Hyprland passes the GLOBAL cursor position: CWindow::checkInputOnDecos
-    // (desktop/view/Window.cpp) forwards the very same coords it just tested with
-    // containsPoint(), and the built-in group bar subtracts its assignedBoxGlobal().pos()
-    // for exactly this reason. Every rect chrome.cpp hands back is bar-relative, so
-    // convert once here — hit-testing raw global coords against local rects silently
-    // never hits anything, which is why no button responded before.
+    // `pos` is GLOBAL, not bar-relative: checkInputOnDecos forwards the very coords it
+    // tested with containsPoint(), and the built-in group bar converts them the same way.
+    // Every rect chrome.cpp returns is bar-relative, so convert once, here.
     const Vector2D p = pos - barBoxGlobal().pos();
 
     // chrome.cpp owns the field geometry AND the hit-test against it, so the clickable
     // area cannot drift from the drawn one.
-    auto buttonAt = [&](const Vector2D& q) { return CDE::buttonAt(size, q, buttons); };
-
     // Keep the pressed highlight in step with the click being tracked. Runs on both
     // edges, so the button un-presses even when the release lands somewhere else.
     auto syncPressed = [&] {
@@ -256,21 +258,20 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     };
 
     switch (type) {
-        // INPUT_TYPE_BUTTON arrives on press AND release (InputManager.cpp,
-        // processMouseDownNormal), with the event in `data`. The action fires on the
-        // release — deliberately NOT on the drag pair: a DRAG_START we swallow stops
-        // Hyprland creating a drag target, and CDragStateController::dragEnd()
-        // early-returns without one, so DRAG_END would never reach us.
+        // INPUT_TYPE_BUTTON arrives on press AND release, with the event in `data`. The
+        // action fires on the RELEASE, never on the drag pair: swallowing DRAG_START stops
+        // Hyprland creating a drag target, and dragEnd() early-returns without one, so
+        // DRAG_END would never arrive at all.
         case INPUT_TYPE_BUTTON: {
             const auto* ev = std::any_cast<IPointer::SButtonEvent>(&data);
             if (!ev || !ev->mouse || ev->button != BTN_LEFT)
                 return false;
 
             if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED)
-                m_clickButton = buttonAt(p);
+                m_clickButton = CDE::buttonAt(size, p, buttons);
             else {
                 const int held = m_clickButton;
-                const int hit  = buttonAt(p);
+                const int hit  = CDE::buttonAt(size, p, buttons);
                 if (held != CDE::BTN_NONE && held == hit)
                     runButtonAction(held);
             }
@@ -280,11 +281,10 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         }
 
         case INPUT_TYPE_DRAG_START: {
-            m_dragStart = p;
             // False on a button: a press landing on a button must never start a window
             // drag. True on the bare bar, so a user-bound `mouse:... movewindow` can
             // still drag the window by its title bar.
-            return buttonAt(p) == CDE::BTN_NONE;
+            return CDE::buttonAt(size, p, buttons) == CDE::BTN_NONE;
         }
 
         // Reached only when a drag really started, i.e. the press missed every button.

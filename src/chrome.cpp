@@ -19,20 +19,45 @@ namespace {
         CHyprColor face, light, dark, title, shadow;
     };
 
-    // The active (focused) window gets its own palette; everything else uses the inactive
-    // one. Both sets are configurable, so nothing here is hardcoded. The shadow is NOT
-    // per-window: examples/title.png shows one black shadow under both, so a single
-    // colour serves both palettes.
+    // The focused window paints with the `_active` colours, everything else with the
+    // un-suffixed ones. Both sets are config values, so nothing here is hardcoded.
+    //
+    // The shadow is the one exception: it is NOT per-window. examples/title.png shows one
+    // black shadow under both states, so a single colour serves both palettes.
     SPalette currentPalette(bool active) {
-        const auto c = CDE::config();
-        return {active ? c.faceActive : c.face, active ? c.lightActive : c.light, active ? c.darkActive : c.dark, active ? c.titleActive : c.title, c.titleShadow};
+        const CDE::SConfig& c = CDE::config();
+
+        SPalette p;
+        p.face   = active ? c.faceActive : c.face;
+        p.light  = active ? c.lightActive : c.light;
+        p.dark   = active ? c.darkActive : c.dark;
+        p.title  = active ? c.titleActive : c.title;
+        p.shadow = c.titleShadow;
+        return p;
     }
 
     // Swap light and dark, keep face, title and shadow. This is what makes a button read
-    // as INSET: the lit edge moves to the bottom/right, which is the opposite of raised.
-    // Motif does this for the held state, and hover borrows the same treatment.
+    // as INSET: the lit edge moves to the bottom/right, the opposite of raised. Motif does
+    // this for the held state, and hover borrows the same treatment.
     SPalette inverted(const SPalette& p) {
-        return {p.face, p.dark, p.light, p.title, p.shadow};
+        SPalette flipped;
+        flipped.face   = p.face;
+        flipped.light  = p.dark;
+        flipped.dark   = p.light;
+        flipped.title  = p.title;
+        flipped.shadow = p.shadow;
+        return flipped;
+    }
+
+    // The colour a character in one of our glyph patterns stands for: 'L' is the lit
+    // bevel colour, 'D' the dark one, anything else (used for the opaque interior of the
+    // float icon) the face colour.
+    CHyprColor colourForGlyphChar(char ch, const SPalette& p) {
+        if (ch == 'L')
+            return p.light;
+        if (ch == 'D')
+            return p.dark;
+        return p.face;
     }
 
     void fill(cairo_t* cr, double x, double y, double w, double h, const CHyprColor& c) {
@@ -50,15 +75,11 @@ namespace {
         fill(cr, x + CDE::SIDE, y, CDE::SIDE, h, p.light);
     }
 
-    // Motif draws its title-bar buttons as a bare raised glyph on the face — no button
-    // box. The glyph is a raised rect: `lit` along the top/left, `shade` along the
-    // bottom/right.
+    // A raised rect: `lit` along the top and left, `shade` along the bottom and right.
     //
-    // The shade is laid down FIRST so that the lit colour wins wherever the two bevels
-    // meet in a corner — that is what the reference does, and all three glyphs show it:
-    // the top row is lit right across (so the top-right cell is lit) and the bottom-left
-    // cell is lit too. Drawn the other way round, dark overwrites both and the glyph is
-    // one pixel wrong at each corner.
+    // ORDER MATTERS. The shade goes down FIRST so the lit colour wins both corners where
+    // the two bevels meet — that is what the reference shows. The other way round, shade
+    // overwrites them and the rect is a pixel wrong at each corner.
     void glyphFrame(cairo_t* cr, const CBox& b, const CHyprColor& lit, const CHyprColor& shade) {
         fill(cr, b.x, b.y + b.h - CDE::SIDE, b.w, CDE::SIDE, shade);
         fill(cr, b.x + b.w - CDE::SIDE, b.y, CDE::SIDE, b.h, shade);
@@ -67,36 +88,34 @@ namespace {
         fill(cr, b.x, b.y, CDE::SIDE, b.h, lit);
     }
 
-    // The one and only bevel painter. The title bar spans the full window width and the
-    // side frames run the full height, so bar and frame OVERLAP in the corners — if each
-    // drew its own bevel there the two would meet and the join would show. Both call
-    // this instead, so the frame and the bar's outer bevel are the same bands by
-    // construction.
+    // The one and only bevel painter, shared by the title bar and the frame strips.
     //
-    // A strip is light, then the grey face band, then dark. The dark side is `outer`,
-    // i.e. which end of the strip faces away from the client:
-    //   left   outer=low  -> light(2) face(2) dark(1)
-    //   right  outer=high -> light(1) face(2) dark(2)
-    //   bottom outer=high -> light(1) face(2) dark(2)
+    // A strip is three bands: a lit one, the grey face in the middle, a dark one. Which
+    // of the lit/dark bands is the WIDE one depends on which end faces away from the
+    // client, which is what `outerIsHigh` says:
+    //
+    //   left   (outerIsHigh=false)  light(2) face(2) dark(1)
+    //   right  (outerIsHigh=true)   light(1) face(2) dark(2)
+    //   bottom (outerIsHigh=true)   light(1) face(2) dark(2)
     void bevelBands(cairo_t* cr, double a, double b, double len, bool vertical, bool outerIsHigh, const SPalette& p) {
-        // The lit band is the WIDE one when it faces outward (left) and the NARROW one
-        // when it faces inward (right, bottom); the dark band takes the other width.
-        const double litW   = outerIsHigh ? CDE::SIDE : CDE::BORDER - CDE::FACE_BAND - CDE::SIDE;
-        const double darkW  = CDE::BORDER - CDE::FACE_BAND - litW;
-        const double faceAt = litW;
-        const double darkAt = litW + CDE::FACE_BAND;
+        const double outwardLitW  = CDE::BORDER - CDE::FACE_BAND - CDE::SIDE; // the wide band
+        const double inwardLitW   = CDE::SIDE;                               // the narrow band
+        const double litW         = outerIsHigh ? inwardLitW : outwardLitW;
+        const double darkW        = CDE::BORDER - CDE::FACE_BAND - litW;
+        const double faceOffset   = litW;
+        const double darkOffset   = litW + CDE::FACE_BAND;
 
         if (vertical) {
             fill(cr, a, b, litW, len, p.light);
-            fill(cr, a + faceAt, b, CDE::FACE_BAND, len, p.face);
-            fill(cr, a + darkAt, b, darkW, len, p.dark);
+            fill(cr, a + faceOffset, b, CDE::FACE_BAND, len, p.face);
+            fill(cr, a + darkOffset, b, darkW, len, p.dark);
         } else {
             // Horizontal: `len` runs along x and the band widths along y. Swapping these
             // draws the lit band as a 1px column, which leaves the bottom frame missing
             // its inner highlight entirely.
             fill(cr, a, b, len, litW, p.light);
-            fill(cr, a, b + faceAt, len, CDE::FACE_BAND, p.face);
-            fill(cr, a, b + darkAt, len, darkW, p.dark);
+            fill(cr, a, b + faceOffset, len, CDE::FACE_BAND, p.face);
+            fill(cr, a, b + darkOffset, len, darkW, p.dark);
         }
     }
 
@@ -132,20 +151,16 @@ namespace {
     void drawCorner(cairo_t* cr, double x, double y, const char* pat, const SPalette& p) {
         for (int r = 0; r < CDE::BORDER; ++r)
             for (int c = 0; c < CDE::BORDER; ++c) {
-                const char     ch = pat[r * CDE::BORDER + c];
-                const CHyprColor col = ch == 'L' ? p.light : ch == 'F' ? p.face : p.dark;
-                fill(cr, x + c, y + r, 1, 1, col);
+                const char ch = pat[r * CDE::BORDER + c];
+                fill(cr, x + c, y + r, 1, 1, colourForGlyphChar(ch, p));
             }
     }
 
-    // The float-toggle glyph for the left button of the right pair, measured from
-    // examples/float-toggle.png (15x15, 3px margin trimmed to the 9x9 core). Two
-    // overlapping 6x6 outlined squares (4x4 hollow), the back one offset up-right by
-    // THREE — the second revision of the image; the first had offset two. The front
-    // square's interior is opaque and occludes the back one's bottom-left corner. Light
-    // on top/left edges, dark on bottom/right — the same raised-bevel convention as the
-    // other glyphs. Replaces the bare 4x4 rect Motif puts there; the reference is
-    // user-supplied, so it outranks CDE-7.png for this button.
+    // The float-toggle glyph, measured from examples/float-toggle.png (15x15, trimmed to
+    // its 9x9 core): two overlapping 6x6 outlined squares, the back one offset up-right by
+    // three, the front one's interior opaque so it occludes the back one's bottom-left
+    // corner. Same bevel convention as the other glyphs: light top/left, dark bottom/right.
+    // '.' is transparent. This reference outranks CDE-7.png for this button.
     constexpr const char* FLOAT_TOGGLE = "...LLLLLL"
                                          "...L....D"
                                          "...L....D"
@@ -162,15 +177,14 @@ namespace {
                 const char ch = FLOAT_TOGGLE[r * CDE::FLOAT_GLYPH + c];
                 if (ch == '.')
                     continue; // transparent — the bar face shows through
-                const CHyprColor col = ch == 'L' ? p.light : ch == 'D' ? p.dark : p.face;
-                fill(cr, x + c, y + r, 1, 1, col);
+                fill(cr, x + c, y + r, 1, 1, colourForGlyphChar(ch, p));
             }
     }
 
-    // A separator marking off the corner grab square. The lit pixel goes on local x=0 in
-    // both directions — for the left strip that is the outer edge, for the right strip the
-    // inner one, which is what the reference does. On a dark-outer strip the outermost
-    // pixel of the second row keeps dark.
+    // A rule marking off the corner grab square on a frame strip. The lit pixel goes on
+    // local x=0 in both directions — the OUTER edge on the left strip, the inner one on
+    // the right, as the reference has it — so `darkOuter` keeps the outermost pixel of the
+    // second row dark where that matters.
     void grabSeparator(cairo_t* cr, double a, double b, double len, bool horizontal, bool darkOuter, const SPalette& p) {
         if (horizontal) {
             fill(cr, a, b, 1, len, p.light);
@@ -184,65 +198,72 @@ namespace {
         }
     }
 
+    // Font options that make text hard-edged, per examples/title.png: no intermediate
+    // colours anywhere in the reference's glyphs. Built once and shared — cairo copies
+    // them into the context on set, so the caller must not free them.
+    //
+    // Hinting stays ON: hinted-and-aliased text renders solid stems, while aliased without
+    // hinting breaks stems on some faces.
+    cairo_font_options_t* aliasedFontOptions() {
+        static cairo_font_options_t* options = [] {
+            cairo_font_options_t* o = cairo_font_options_create();
+            cairo_font_options_set_antialias(o, CAIRO_ANTIALIAS_NONE);
+            cairo_font_options_set_hint_style(o, CAIRO_HINT_STYLE_FULL);
+            cairo_font_options_set_hint_metrics(o, CAIRO_HINT_METRICS_ON);
+            return o;
+        }();
+        return options;
+    }
+
 } // namespace
 
 namespace CDE {
 
-    // The corner grab square is BAR_HEIGHT - 1 at both reference data points (21 with a
-    // 22px bar, 24 with a 25px one), so it tracks the configured bar height rather than
-    // being a fixed 21. Clamped to something the rules can actually mark: below ~6px the
-    // two grab rules and the field separators would overlap into mush.
+    // Size of the corner grab square: bar height minus one, from both reference data
+    // points (21 at a 22px bar, 24 at 25px). Floored at 6, below which the grab rules and
+    // the field separators overlap into mush. See AGENTS.md `## Corners`.
     int cornerGrab() {
         return std::max(6, config().barHeight - 1);
     }
 
-    // A button field is a SQUARE whose size follows the bar height: fieldH is whatever is
-    // left between the groove and the bottom edge, and the width matches it.
-    //
-    // FIELD_W (15) is the measured width at the measured 22px bar — and 22 - 6 - 1 = 15,
-    // so "make the field as wide as it is tall" reproduces the reference exactly at the
-    // size it was measured at, and grows in BOTH axes as the bar grows instead of only
-    // stretching in height. That is the same reasoning as cornerGrab(): one distance, read
-    // off the bar, drives every size along it.
+    // A button field is a SQUARE sized by the bar: as wide as the field is tall. At the
+    // 22px bar the reference measured a 15px field, and 22 - FIELD_TOP - SIDE is exactly
+    // 15, so this reproduces it and then grows both axes with the bar.
     double buttonFieldWidth(Vector2D size) {
-        const double fieldTop = BEVEL + 2 + GROOVE * 2;
-        return std::max(0.0, size.y - fieldTop - SIDE);
+        return std::max(0.0, size.y - FIELD_TOP - SIDE);
     }
 
-    // Reference: examples/CDE-7.png. The left field runs from bar-relative x6..x20,
-    // so the separator that closes it sits at x21.
+    // Bar-relative x of the separator closing the close field: 21 at the reference's
+    // 22px bar, tracking the field width as the bar grows.
     double leftFieldEnd(Vector2D size) {
         return LEFT_SEP + SIDE * 2 + buttonFieldWidth(size);
     }
 
-    // The right side carries three separators — title/fieldA, between the pair, and the
-    // outermost one — at bar-relative x (width-40), (width-23) and (width-6).
+    // Bar-relative x where the right-hand field pair starts: width-40 at the reference's
+    // 22px bar.
     double rightFieldStart(Vector2D size) {
         return size.x - RIGHT_MARGIN - 2 * (buttonFieldWidth(size) + SIDE * 2);
     }
 
-    CBox titleField(Vector2D size) {
+    // The flexible region between the close field and the right pair.
+    CBox titleFieldRect(Vector2D size) {
         const double x = leftFieldEnd(size) + SIDE * 2;
         return {x, 0, std::max(0.0, rightFieldStart(size) - x), size.y};
     }
 
-    // Motif's title-bar glyphs, measured from CDE-7.png at BAR_HEIGHT 22. All three are
-    // centred on the *field* (rows 6..20, centre 13.5), not on the bar — centring on the
-    // bar puts every glyph ~1.5px high, which reads as a vertical alignment bug.
-    //   left (window menu)  9 x 4   rows 11-14
-    //   minimize             4 x 4   rows 11-14
-    //   maximize             9 x 9   rows  9-17
-    // The clickable FIELD, not the glyph. The glyph is 9x4..11x11 inside a FIELD_W-wide
-    // field, so hit-testing the glyph alone leaves a few-pixel target and clicks feel
-    // spotty — the user aims at the field, which is what Motif makes clickable.
+    // The clickable area of one button: the square field the glyph sits in, which is also
+    // what the hover highlight covers. Hit-testing the glyph instead leaves a 9x4px target
+    // on close and clicks feel spotty — the user aims at the field, as Motif makes the
+    // whole field clickable.
     CBox buttonFieldRect(Vector2D size, int btn, bool showButtons) {
         if (!showButtons || btn < 0 || btn >= BTN_COUNT)
             return {};
 
-        const double fieldTop = BEVEL + 2 + GROOVE * 2;
+        const double fieldTop = FIELD_TOP;
         const double fieldH   = size.y - fieldTop - SIDE;
-        const double fieldW   = buttonFieldWidth(size); // square: as wide as it is tall
+        const double fieldW   = buttonFieldWidth(size);
 
+        // Close sits in the left field; float and max are the pair on the right, max second.
         double fieldX;
         if (btn == BTN_CLOSE)
             fieldX = LEFT_SEP + SIDE * 2;
@@ -254,18 +275,19 @@ namespace CDE {
         return {std::floor(fieldX), fieldTop, fieldW, fieldH};
     }
 
-    CBox buttonRect(Vector2D size, int btn, bool showButtons) {
+    // The glyph inside a button field: a fixed measured size, centred on the FIELD rather
+    // than on the bar. Centring on the bar puts every glyph ~1.5px high at the reference
+    // size, which reads as a vertical alignment bug.
+    CBox buttonGlyphRect(Vector2D size, int btn, bool showButtons) {
         const CBox field = buttonFieldRect(size, btn, showButtons);
         if (!field.w)
             return {};
 
         const double centre = field.y + field.h / 2;
 
-        double w = 4, h = 4;
+        double       w = CLOSE_GLYPH_W, h = CLOSE_GLYPH_H;
         if (btn == BTN_MAX)
-            w = h = 11; // 2px larger than the 9x9 reference, still centred
-        else if (btn == BTN_CLOSE)
-            w = 9, h = 4;
+            w = h = MAX_GLYPH;
         else if (btn == BTN_FLOAT)
             w = h = FLOAT_GLYPH;
 
@@ -287,155 +309,161 @@ namespace CDE {
         return BTN_NONE;
     }
 
-    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active) {
-        const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
-        const SPalette p = currentPalette(active);
-
-        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-        cairo_t*         cr   = cairo_create(surf);
-        cairo_scale(cr, scale, scale);
-
+    // Fills the whole bar with the face colour, then the top bevel and the groove that
+    // separate the decorative rows from the field row everything else lives in.
+    void drawBarBackground(cairo_t* cr, Vector2D size, const SPalette& p) {
         fill(cr, 0, 0, size.x, size.y, p.face);
 
-        // Top bevel, then the groove that separates it from the field row.
         fill(cr, 0, 0, size.x, BEVEL, p.light);
         fill(cr, 0, BEVEL + 2, size.x, GROOVE, p.dark);
-        fill(cr, 0, BEVEL + 2 + GROOVE, size.x, GROOVE, p.light);
+        // The groove's light half starts right after its dark half, so this is
+        // FIELD_TOP - GROOVE, not FIELD_TOP: the field begins only once both are drawn.
+        fill(cr, 0, FIELD_TOP - GROOVE, size.x, GROOVE, p.light);
 
-        // The bar's left and right ends ARE the frame's left and right bevels — the bar
-        // spans the full window width, so these columns are shared with the side frames
-        // and must be painted by the same routine, or the join shows.
-        bevelBands(cr, 0, BEVEL, size.y - BEVEL, true, false, p);                       // left
-        bevelBands(cr, size.x - CDE::BORDER, BEVEL, size.y - BEVEL, true, true, p);     // right
+        // The bar's left and right ends ARE the frame's side bevels — the bar spans the
+        // full window width, so these columns are shared with the side strips and must
+        // be painted by the same routine or the join shows.
+        bevelBands(cr, 0, BEVEL, size.y - BEVEL, true, false, p);
+        bevelBands(cr, size.x - CDE::BORDER, BEVEL, size.y - BEVEL, true, true, p);
 
-        // Bottom edge of the bar.
         fill(cr, 0, size.y - SIDE, size.x, SIDE, p.dark);
+    }
 
-        const double lfEnd = leftFieldEnd(size), rfStart = rightFieldStart(size);
-        if (LEFT_SEP < rfStart) {
-            const double sepTop = BEVEL + 2 + GROOVE * 2;
-            const double sepH   = size.y - sepTop - SIDE;
-            const double fieldW = buttonFieldWidth(size);
-            separator(cr, LEFT_SEP, sepTop, sepH, p);
-            separator(cr, lfEnd, sepTop, sepH, p);
-            separator(cr, rfStart, sepTop, sepH, p);
-            separator(cr, rfStart + fieldW + SIDE * 2, sepTop, sepH, p);
-            separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
-        }
+    // The five separators that divide the bar into fields: the left inset, the one closing
+    // the close field, the three on the right. Skipped on a window too narrow to hold them.
+    void drawFieldSeparators(cairo_t* cr, Vector2D size, const SPalette& p) {
+        const double rightFieldX = rightFieldStart(size);
+        if (LEFT_SEP >= rightFieldX)
+            return;
 
-        // The corner grab's vertical rule spans the full height of the grab square, from
-        // bar-rel 1 to the bottom edge — unlike the field separators, which start below
-        // the bevel. It lands on the same columns as the left-field and mid-right
-        // separators, but reaches further, so it is drawn separately rather than by
-        // widening those. The groove's light row breaks it, which is what the reference
-        // shows, hence the two spans.
+        const double sepTop   = FIELD_TOP;
+        const double sepH     = size.y - sepTop - SIDE;
+        const double fieldW   = buttonFieldWidth(size);
+
+        separator(cr, LEFT_SEP, sepTop, sepH, p);
+        separator(cr, leftFieldEnd(size), sepTop, sepH, p);
+        separator(cr, rightFieldX, sepTop, sepH, p);
+        separator(cr, rightFieldX + fieldW + SIDE * 2, sepTop, sepH, p);
+        separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
+    }
+
+    // The vertical rules marking off the corner grab square. They run the full height of
+    // the square, from bar-rel 1 to the bottom edge, unlike the field separators which
+    // start below the bevel — and they land on the same columns as two of those, so
+    // drawing them separately is the only way to reach further without widening them.
+    // The groove's light row breaks them, as in the reference, hence the two spans.
+    void drawCornerGrabRules(cairo_t* cr, Vector2D size, const SPalette& p) {
         const int grab = cornerGrab();
-        if (size.x > grab * 2 + 4) {
-            const double above = BEVEL + GROOVE + 1;          // rows 1..BEVEL+GROOVE
-            const double below = above + GROOVE + 1;          // rows BEVEL+GROOVE+2..h-1
-            auto        grabRule = [&](double x) {
-                separator(cr, x, 1, above, p);
-                separator(cr, x, below, size.y - below, p);
-            };
-            grabRule(grab);
-            grabRule(size.x - grab - 2);
+        // Below this width the two rules would collide, so a narrow window gets none.
+        if (size.x <= grab * 2 + 4)
+            return;
+
+        const double aboveTop = 1;                      // first row of the rule
+        const double aboveBot = BEVEL + GROOVE + 1;     // last row of the upper span, inclusive
+        const double belowTop = aboveBot + GROOVE + 1;  // first row after the groove's light row
+
+        auto drawRule = [&](double x) {
+            separator(cr, x, aboveTop, aboveBot - aboveTop + 1, p);
+            separator(cr, x, belowTop, size.y - belowTop, p);
+        };
+
+        drawRule(grab);
+        drawRule(size.x - grab - 2);
+    }
+
+    // The three buttons. Hover and held both read as INSET: the lit edge moves to the
+    // bottom/right, the opposite of raised. Hover is deliberately NOT a wash of colour
+    // across the field — that flattens the bevel and reads as a patch sitting on the bar
+    // rather than as part of it.
+    void drawButtons(cairo_t* cr, Vector2D size, int hovered, int pressed, const SPalette& palette) {
+        if (!config().showButtons)
+            return;
+
+        for (int b = 0; b < BTN_COUNT; ++b) {
+            const CBox field = buttonFieldRect(size, b, true);
+            const CBox glyph = buttonGlyphRect(size, b, true);
+            if (!field.w || !glyph.w)
+                continue;
+
+            const bool      highlighted = hovered == b || pressed == b;
+            const SPalette p = highlighted ? inverted(palette) : palette;
+
+            // The highlight covers the FIELD — the whole square the user clicks — not the
+            // glyph. The glyph is a small fixed size inside a square that grows with the
+            // bar, so lighting it alone leaves most of the clickable area inert.
+            if (highlighted)
+                glyphFrame(cr, field, p.light, p.dark);
+
+            // Only the float toggle has artwork inside it. Close and max are bare boxes,
+            // as the reference draws them.
+            if (b == BTN_FLOAT)
+                drawFloatToggle(cr, glyph.x, glyph.y, p);
+            else
+                glyphFrame(cr, glyph, p.light, p.dark);
+        }
+    }
+
+    // The window title, centred in the title field, aliased, with a hard 1px shadow.
+    //
+    // The baseline is centred on the FIELD (rows FIELD_TOP..size.y-1) using the font's own
+    // ascent/descent — not the string's ink height, which moves with the glyphs present.
+    // Both axes are floored: with antialiasing off cairo rounds each glyph to whole pixels
+    // independently, so a fractional origin spaces the stems unevenly and, with the shadow
+    // underneath, reads as text drawn twice.
+    void drawTitle(cairo_t* cr, Vector2D size, const std::string& title, int fontSize, const SPalette& p) {
+        if (title.empty() || fontSize <= 0)
+            return;
+
+        const CBox field = titleFieldRect(size);
+
+        cairo_select_font_face(cr, TITLE_FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, fontSize);
+        cairo_set_font_options(cr, aliasedFontOptions());
+
+        cairo_text_extents_t textExtents;
+        cairo_text_extents(cr, title.c_str(), &textExtents);
+
+        // Shrink to fit rather than overflow into the button fields.
+        const double available = field.w - TITLE_PADDING;
+        if (textExtents.width > available && textExtents.width > 0) {
+            cairo_set_font_size(cr, fontSize * available / textExtents.width);
+            cairo_text_extents(cr, title.c_str(), &textExtents);
         }
 
-        if (config().showButtons) {
-            for (int b = 0; b < BTN_COUNT; ++b) {
-                const CBox field = buttonFieldRect(size, b, true);
-                const CBox r     = buttonRect(size, b, true);
-                if (!field.w || !r.w)
-                    continue;
+        cairo_font_extents_t fontExtents;
+        cairo_font_extents(cr, &fontExtents);
 
-                // Hover and held both read as INSET. Motif swaps the bevel when a button
-                // is held — the lit edge moves to the bottom/right, the opposite of
-                // raised — and hover borrows that same swap. It is deliberately NOT a
-                // wash of highlight colour across the field: painting the background
-                // flattens the bevel and reads as a mis-coloured patch sitting on the
-                // bar rather than as part of it. (The held state is not visible in the
-                // reference, so this mirrors the unheld rule rather than confirming it.)
-                const SPalette bp = (hovered == b || pressed == b) ? inverted(p) : p;
+        const double fieldCentre = FIELD_TOP + (size.y - FIELD_TOP - SIDE) / 2;
+        const double baseline     = std::floor(fieldCentre + (fontExtents.ascent - fontExtents.descent) / 2);
+        const double left         = std::floor(field.x + (field.w - textExtents.width) / 2 - textExtents.x_bearing);
 
-                // The highlight goes on the FIELD — the whole square — not on the glyph.
-                // The glyph is only 9x9 inside a square that grows with the bar, so
-                // highlighting it alone means most of the clickable area lights nothing,
-                // and the button appears to react in patches.
-                if (hovered == b || pressed == b)
-                    glyphFrame(cr, field, bp.light, bp.dark);
+        // The shadow: the same string one pixel down and right, in black. No blur and no
+        // alpha ramp — the reference's shadow pixels are as solid as the glyphs'. Drawn
+        // first so the text sits on top of it.
+        cairo_move_to(cr, left + TITLE_SHADOW_DX, baseline + TITLE_SHADOW_DY);
+        cairo_set_source_rgb(cr, p.shadow.r, p.shadow.g, p.shadow.b);
+        cairo_show_text(cr, title.c_str());
 
-                // The float toggle carries its own icon instead of a bare raised rect,
-                // and takes the same swap.
-                if (b == BTN_FLOAT)
-                    drawFloatToggle(cr, r.x, r.y, bp);
-                else
-                    glyphFrame(cr, r, bp.light, bp.dark);
-            }
-        }
+        cairo_move_to(cr, left, baseline);
+        cairo_set_source_rgb(cr, p.title.r, p.title.g, p.title.b);
+        cairo_show_text(cr, title.c_str());
+    }
 
-        // Title, centred in the title field. Motif draws it in white on the face.
-        if (!title.empty() && fontSize > 0) {
-            const CBox field = titleField(size);
+    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active) {
+        const int surfaceW = std::max(1, sc<int>(size.x * scale));
+        const int surfaceH = std::max(1, sc<int>(size.y * scale));
 
-            // "Chicago" is the macOS System font as reissued in ChicagoFLF (nixpkgs
-            // `chicago-font`) — the blocky, square-cornered face in examples/title.png.
-            // The toy API takes one family with no fallback chain, so this relies on
-            // fontconfig resolving it (it is installed here); if it ever is not, Cairo
-            // silently substitutes a default face rather than failing.
-            cairo_select_font_face(cr, TITLE_FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-            cairo_set_font_size(cr, fontSize);
+        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surfaceW, surfaceH);
+        cairo_t*         cr   = cairo_create(surf);
+        cairo_scale(cr, scale, scale); // draw in logical pixels; the surface is device-sized
 
-            // Aliased, per examples/title.png: the reference has NO intermediate
-            // colours anywhere — every glyph pixel is either fully text or fully
-            // background, so cairo's default greyscale antialiasing is wrong here.
-            // Hinting stays on (the default) so stems snap to the pixel grid; without it
-            // hinted-and-aliased text renders with visibly broken stems on some faces.
-            static cairo_font_options_t* fontOpts = [] {
-                cairo_font_options_t* o = cairo_font_options_create();
-                cairo_font_options_set_antialias(o, CAIRO_ANTIALIAS_NONE);
-                cairo_font_options_set_hint_style(o, CAIRO_HINT_STYLE_FULL);
-                cairo_font_options_set_hint_metrics(o, CAIRO_HINT_METRICS_ON);
-                return o;
-            }();
-            cairo_set_font_options(cr, fontOpts);
+        const SPalette p = currentPalette(active);
 
-            cairo_text_extents_t ext;
-            cairo_text_extents(cr, title.c_str(), &ext);
-
-            const double avail = field.w - 8;
-            if (ext.width > avail && ext.width > 0) {
-                // Shrink to fit rather than overflow into the button fields.
-                cairo_set_font_size(cr, fontSize * avail / ext.width);
-                cairo_text_extents(cr, title.c_str(), &ext);
-            }
-
-            // Centre on the FIELD (rows 6..20), not on the bar — the same band the button glyphs
-            // centre on — and do it with the font's own ascent/descent rather than the
-            // string's ink height, which shifts with the glyphs present. Baseline = centre
-            // + (ascent - descent)/2 puts the middle of the ascent..descent box on it.
-            cairo_font_extents_t fe;
-            cairo_font_extents(cr, &fe);
-            const double fieldTop    = BEVEL + 2 + GROOVE * 2;
-            const double fieldCentre = fieldTop + (size.y - fieldTop - SIDE) / 2;
-
-            // FLOOR both axes. With ANTIALIAS_NONE cairo rounds each glyph to whole
-            // pixels independently, so a fractional origin spaces the stems unevenly —
-            // and with the 1px shadow underneath, that reads as text drawn twice.
-            const double tx = std::floor(field.x + (field.w - ext.width) / 2 - ext.x_bearing);
-            const double ty = std::floor(fieldCentre + (fe.ascent - fe.descent) / 2);
-
-            // Simple hard shadow, measured off examples/title.png: a second copy of the
-            // same string offset ONE pixel down and right, in black. No blur, no alpha
-            // ramp — the reference's shadow pixels are as solid as the glyph's. Drawn
-            // first so the text sits on top of it.
-            cairo_move_to(cr, tx + TITLE_SHADOW_DX, ty + TITLE_SHADOW_DY);
-            cairo_set_source_rgb(cr, p.shadow.r, p.shadow.g, p.shadow.b);
-            cairo_show_text(cr, title.c_str());
-
-            cairo_move_to(cr, tx, ty);
-            cairo_set_source_rgb(cr, p.title.r, p.title.g, p.title.b);
-            cairo_show_text(cr, title.c_str());
-        }
+        drawBarBackground(cr, size, p);
+        drawFieldSeparators(cr, size, p);
+        drawCornerGrabRules(cr, size, p);
+        drawButtons(cr, size, hovered, pressed, p);
+        drawTitle(cr, size, title, fontSize, p);
 
         cairo_destroy(cr);
 
@@ -444,35 +472,25 @@ namespace CDE {
         return tex;
     }
 
-    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
-        const int      w = std::max(1, sc<int>(size.x * scale)), h = std::max(1, sc<int>(size.y * scale));
-        const SPalette p = currentPalette(active);
-
-        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-        cairo_t*         cr   = cairo_create(surf);
-        cairo_scale(cr, scale, scale);
-
-        // Same painter the title bar uses for its own ends, so the frame and the bar are the
-        // same bands by construction. `outerIsHigh` says which end faces away from the
-        // client: for the left strip that is the low end, for right and bottom the high
-        // end — which is why the lit band swaps sides between them.
-        // `grab` is the corner-grab square, measured along the BAR's height, so the same
-        // value marks the grab square on the frame strips as on the bar.
+    // Paints one edge of the window frame: the bevel bands, then the two mitred corners
+    // that strip owns.
+    //
+    // Ownership is what stops the corners fighting: the side strips run the FULL window
+    // height so they take the top pair (painting over the bar's top rows, which is what
+    // makes the bevel read as spanning the full width), and the bottom strip is drawn last
+    // so it takes the bottom pair. No reordering needed.
+    void drawFrameStrip(cairo_t* cr, uint32_t edge, Vector2D size, const SPalette& p) {
+        // The grab square is measured along the BAR's height, so the same value marks the
+        // grab square here as it does on the bar.
         const int grab = cornerGrab();
 
         switch (edge) {
             case DECORATION_EDGE_LEFT: bevelBands(cr, 0, 0, size.y, true, false, p); break;
             case DECORATION_EDGE_RIGHT: bevelBands(cr, 0, 0, size.y, true, true, p); break;
             case DECORATION_EDGE_BOTTOM: bevelBands(cr, 0, 0, size.x, false, true, p); break;
-            default: break;
+            default: return;
         }
 
-        // Corners. Each strip owns the two corners it runs through: the side strips run
-        // the full window height so they take the top pair (and paint over the bar's top
-        // rows, which is what makes the bevel read as spanning the full width), while the
-        // bottom strip is drawn last and so takes the bottom pair. The top corner grab
-        // boundaries need no new rules — the bar's bottom edge and its own field
-        // separators already fall exactly on the grab square.
         if (edge == DECORATION_EDGE_LEFT) {
             drawCorner(cr, 0, 0, TL, p);
             // Horizontal rule at each end. The top one lands on the bar's bottom edge.
@@ -482,14 +500,24 @@ namespace CDE {
             drawCorner(cr, 0, 0, TR, p);
             grabSeparator(cr, 0, grab, 1, true, true, p);
             grabSeparator(cr, 0, size.y - grab - 2, 1, true, true, p);
-        } else if (edge == DECORATION_EDGE_BOTTOM) {
+        } else {
             drawCorner(cr, 0, 0, BL, p);
             drawCorner(cr, size.x - CDE::BORDER, 0, BR, p);
-
-            // Vertical rule, spanning the middle 3 rows of the strip.
+            // Vertical rule, spanning the middle rows of the strip.
             grabSeparator(cr, grab, 0, 0, false, true, p);
             grabSeparator(cr, size.x - grab - 2, 0, 0, false, true, p);
         }
+    }
+
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
+        const int surfaceW = std::max(1, sc<int>(size.x * scale));
+        const int surfaceH = std::max(1, sc<int>(size.y * scale));
+
+        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surfaceW, surfaceH);
+        cairo_t*         cr   = cairo_create(surf);
+        cairo_scale(cr, scale, scale);
+
+        drawFrameStrip(cr, edge, size, currentPalette(active));
 
         cairo_destroy(cr);
 
