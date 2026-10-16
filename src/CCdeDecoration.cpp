@@ -53,44 +53,78 @@ void CCdeDecoration::updateWindow(PHLWINDOW) {
     m_barTex.reset();
 }
 
-CBox CCdeDecoration::outerBox() const {
-    auto siblingBox = [&](const char* name) {
-        for (const auto& d : m_window->m_windowDecorations)
-            if (d && d->getDisplayName() == name)
-                return g_pDecorationPositioner->getWindowDecorationBox(d.get());
-        return CBox{};
-    };
+// The box the compositor gave one of our sibling strips, or {} when it has none yet.
+static CBox siblingBox(const PHLWINDOWREF& window, const char* name) {
+    for (const auto& d : window->m_windowDecorations)
+        if (d && d->getDisplayName() == name)
+            return g_pDecorationPositioner->getWindowDecorationBox(d.get());
+    return {};
+}
 
-    const CBox   own      = g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(this));
-    const CBox   topSib   = siblingBox("CDE");
-    const CBox   botSib   = siblingBox("CDE:bottom");
-    const CBox   leftSib  = siblingBox("CDE:left");
-    const CBox   rightSib = siblingBox("CDE:right");
+CBox CCdeDecoration::windowBox() const {
+    const CBox own      = g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(this));
+    const CBox topSib   = siblingBox(m_window, "CDE");
+    const CBox botSib   = siblingBox(m_window, "CDE:bottom");
+    const CBox leftSib  = siblingBox(m_window, "CDE:left");
+    const CBox rightSib = siblingBox(m_window, "CDE:right");
 
     // The outer span comes from the SIBLING decorations, never from our own box. `own` is
     // a different rectangle per edge — for the top it is the client box, for the left it
     // already starts at the window's outer edge — so re-expanding it uniformly pushes the
     // side frames a border further out than the client and leaves bare wallpaper between
     // them. The compositor positions those boxes, so we read them directly.
-    const double winX      = leftSib.w  > 0 ? leftSib.x : own.x;
+    const double winX      = leftSib.w > 0 ? leftSib.x : own.x;
     const double winRight  = rightSib.w > 0 ? rightSib.x + rightSib.w : own.x + own.w;
-    const double winY      = topSib.h  > 0 ? topSib.y : own.y;
-    const double winBottom = botSib.h  > 0 ? botSib.y + botSib.h : own.y + own.h;
-    const double winW      = winRight - winX;
-    const double winH      = winBottom - winY;
+    const double winY      = topSib.h > 0 ? topSib.y : own.y;
+    const double winBottom = botSib.h > 0 ? botSib.y + botSib.h : own.y + own.h;
+
+    return {winX, winY, winRight - winX, winBottom - winY};
+}
+
+CBox CCdeDecoration::outerBox() const {
+    const CBox win = windowBox();
 
     switch (m_edge) {
         // Motif's title bar spans the FULL window width, frame bands included — that is
         // the whole point of it. Using the client width leaves wallpaper gaps in the
         // top corners.
-        case DECORATION_EDGE_TOP: return {winX, winY, winW, topSib.h > 0 ? topSib.h : own.h};
+        case DECORATION_EDGE_TOP: {
+            // The bar's height is the positioner's answer for THIS decoration: on the top
+            // edge our own box *is* the sibling the other three read.
+            const CBox own = g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(this));
+            return {win.x, win.y, win.w, own.h};
+        }
         // The side frames run the FULL height: alongside the bar as well as below it.
-        case DECORATION_EDGE_LEFT: return {winX, winY, CDE::BORDER, winH};
-        case DECORATION_EDGE_RIGHT: return {winX + winW - CDE::BORDER, winY, CDE::BORDER, winH};
+        case DECORATION_EDGE_LEFT: return {win.x, win.y, CDE::BORDER, win.h};
+        case DECORATION_EDGE_RIGHT: return {win.x + win.w - CDE::BORDER, win.y, CDE::BORDER, win.h};
         // Bottom spans the full width, overlapping both corners.
-        case DECORATION_EDGE_BOTTOM: return {winX, winBottom - CDE::BORDER, winW, CDE::BORDER};
+        case DECORATION_EDGE_BOTTOM: return {win.x, win.y + win.h - CDE::BORDER, win.w, CDE::BORDER};
         default: return {};
     }
+}
+
+// Which bottom corner grab square a GLOBAL point is in, or CORNER_NONE. One square spans
+// the bottom strip and the foot of both side strips, so which decoration happens to see
+// the press is an accident of iteration order — all four test the same two rects.
+Layout::eRectCorner CCdeDecoration::cornerAt(const Vector2D& globalPos) const {
+    const CBox   win  = windowBox();
+    const double grab = CDE::cornerGrab();
+
+    if (!win.w || !win.h)
+        return Layout::CORNER_NONE;
+
+    // The handle is the window's outer EDGE: the full thickness of the bottom border, grab
+    // wide, flush with the outermost pixel on both axes. The drawn grab square above it is a
+    // marker measured from the same corners but stops two pixels short of the edge, so
+    // aiming at the drawn rule lands outside a square measured that way.
+    const CBox left  = {win.x, win.y + win.h - CDE::BORDER, grab, CDE::BORDER};
+    const CBox right = {win.x + win.w - grab, left.y, grab, CDE::BORDER};
+
+    if (left.containsPoint(globalPos))
+        return Layout::CORNER_BOTTOMLEFT;
+    if (right.containsPoint(globalPos))
+        return Layout::CORNER_BOTTOMRIGHT;
+    return Layout::CORNER_NONE;
 }
 
 void CCdeDecoration::damageEntire() {
@@ -214,10 +248,14 @@ void CCdeDecoration::startDrag() {
     m_clickButton = CDE::BTN_NONE;
     m_barTex.reset();
 
-    g_layoutManager->beginDragTarget(self->layoutTarget(), MBIND_MOVE);
+    // The corner only means anything for a resize: a move leaves it unset so the controller
+    // picks its own grab point.
+    const std::optional<Layout::eRectCorner> corner = m_dragMode == MBIND_RESIZE ? std::optional(m_dragCorner) : std::nullopt;
+
+    g_layoutManager->beginDragTarget(self->layoutTarget(), m_dragMode, corner);
 }
 
-void CCdeDecoration::endDrag() {
+void CCdeDecoration::endGesture() {
     const bool owned = m_dragging;
 
     // Cleared BEFORE ending: endDragTarget() routes back into this decoration's DRAG_END
@@ -237,16 +275,8 @@ void CCdeDecoration::endDrag() {
 }
 
 bool CCdeDecoration::syncDrag(const Vector2D& globalPos) {
-    if (!isTop() || !windowVisible())
+    if (!windowVisible())
         return false;
-
-    // A release that never reached us — it landed off the window, where only the
-    // compositor sees it — would otherwise leave the drag running and the window trailing
-    // the cursor. The next mouse move of any kind heals it.
-    if (!g_pInputManager->hasHeldButtons() && (m_dragging || m_dragArmed)) {
-        endDrag();
-        return false;
-    }
 
     if (!m_dragArmed)
         return false;
@@ -263,8 +293,8 @@ bool CCdeDecoration::syncDrag(const Vector2D& globalPos) {
 
     m_dragArmed = false;
 
-    // A fullscreen window does not move, same as under the compositor's own move bind
-    // (CKeybindManager::changeMouseBindMode skips it before we are even asked).
+    // A fullscreen window does not move or resize, same as under the compositor's own move and
+    // resize binds (CKeybindManager::changeMouseBindMode skips it before we are even asked).
     const PHLWINDOW self = m_window.lock();
     if (!self || Fullscreen::controller()->isFullscreen(self))
         return false;
@@ -313,7 +343,30 @@ void CCdeDecoration::ensureTextures(float scale) {
 }
 
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data) {
-    // Only the top edge has buttons; the frame edges are decorative for now.
+    const auto* ev         = type == INPUT_TYPE_BUTTON ? std::any_cast<IPointer::SButtonEvent>(&data) : nullptr;
+    const bool   leftDown  = ev && ev->mouse && ev->button == BTN_LEFT && windowVisible();
+
+    // The corner grab squares are tested before anything else and on EVERY edge: the square
+    // spans the bottom strip and the foot of both sides, so which decoration gets the press
+    // depends on the order the compositor walks them in. A press there is a resize handle,
+    // never a click.
+    const Layout::eRectCorner corner = leftDown ? cornerAt(pos) : Layout::CORNER_NONE;
+
+    if (corner != Layout::CORNER_NONE) {
+        if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED) {
+            // Armed, not started: syncDrag() waits for DRAG_THRESHOLD so a click on a corner
+            // does not nudge the window.
+            m_dragArmed  = true;
+            m_dragOrigin = pos;
+            m_dragMode   = MBIND_RESIZE;
+            m_dragCorner = corner;
+        } else {
+            endGesture();
+        }
+        return false;
+    }
+
+    // Only the top edge has buttons; the rest is frame.
     if (!isTop())
         return true;
 
@@ -338,8 +391,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         // INPUT_TYPE_BUTTON arrives on press AND release, with the event in `data`. A
         // click's action fires on the RELEASE, never on the press.
         case INPUT_TYPE_BUTTON: {
-            const auto* ev = std::any_cast<IPointer::SButtonEvent>(&data);
-            if (!ev || !ev->mouse || ev->button != BTN_LEFT)
+            if (!leftDown)
                 return false;
 
             // chrome.cpp owns the field geometry AND the hit-test against it, so the clickable
@@ -354,6 +406,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
                 if (hit == CDE::BTN_NONE) {
                     m_dragArmed  = true;
                     m_dragOrigin = pos;
+                    m_dragMode   = MBIND_MOVE;
                 }
             } else {
                 const int held = m_clickButton;
@@ -362,7 +415,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
 
                 // The release can land anywhere on the bar, so the drag ends here rather
                 // than waiting for the cursor to come back over it.
-                endDrag();
+                endGesture();
             }
 
             syncPressed();

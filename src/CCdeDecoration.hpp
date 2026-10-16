@@ -7,6 +7,8 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/helpers/math/Math.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 
@@ -68,10 +70,21 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // dragged. Returns true if a drag started, so the caller can damage the bar.
     bool syncDrag(const Vector2D& globalPos);
 
+    // Retires a gesture this decoration armed or started, whether a bar drag or a corner
+    // resize. Public because main.cpp's mouse.button listener calls it for every decoration:
+    // a release that lands off the window never reaches onInputOnDeco, and nothing else
+    // ends a gesture the plugin started — the compositor's own drag is ended by the mouse
+    // bind that owns it, and there is no bind here.
+    void endGesture();
+
   private:
     bool isTop() const {
         return m_edge == DECORATION_EDGE_TOP;
     }
+
+    // The window's outer rect, from the boxes the compositor gave the four sibling strips.
+    // This is what the corner grab squares are measured from.
+    CBox windowBox() const;
 
     // The CDE frame is one ring around the client, so every strip is sized against the
     // window's OUTER span, not the reserved box the positioner hands back (which has
@@ -79,6 +92,11 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // this — a texture rastered at one size and stretched over the other puts the
     // separators out of register with the buttons.
     CBox outerBox() const;
+
+    // Which bottom corner grab square a GLOBAL point is in, or CORNER_NONE. One square spans
+    // the bottom strip and the foot of both side strips, so which decoration happens to see
+    // the press is an accident of iteration order — all four test the same two rects.
+    Layout::eRectCorner cornerAt(const Vector2D& globalPos) const;
 
     // outerBox() translated into the space the compositor actually hands input and draw
     // calls in: global screen coordinates, workspace render offset included. The bar
@@ -91,15 +109,14 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // the hyprlang and the Lua config backends.
     void runButtonAction(int btn);
 
-    // Hands the window to the compositor's own drag controller, which is what makes the
-    // bar drag natively: it is the same drag a `mouse:…, movewindow` bind produces, so
-    // float-on-drag, drag_threshold, snapping and drag-into-group all behave as the user
-    // configured them. Not CWindow::moveWindowPos, which would ignore every one of those.
+    // Hands the window to the compositor's own drag controller, which is what makes the bar
+    // drag and the corners resize natively: it is the same drag a `mouse:…, movewindow` /
+    // `resizeactive` bind produces, so float-on-drag, drag_threshold, min/max sizes,
+    // snapping and aspect-ratio all behave as the user configured them. Not
+    // CWindow::moveWindowPos / moveWindowSize, which would ignore every one of those.
+    // m_dragMode is MBIND_MOVE for the bar and MBIND_RESIZE for a corner, where
+    // m_dragCorner says which corner was grabbed.
     void startDrag();
-
-    // Ends a drag this decoration started. Does nothing if the compositor ended it
-    // already (the window unmapped mid-drag ends it from CWindow::onWindowRemoved).
-    void endDrag();
 
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
@@ -142,12 +159,14 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // Button the press landed on. Kept separate from m_pressed because the action fires
     // on release, and only if the release lands on the same button.
     int         m_clickButton = CDE::BTN_NONE;
-    // A press on the bare bar, waiting for the cursor to travel DRAG_THRESHOLD before the
-    // window starts moving.
-    bool        m_dragArmed = false;
-    Vector2D    m_dragOrigin = {};
-    // Whether the compositor is currently dragging THIS window on our behalf.
-    bool        m_dragging = false;
+    // A press on the bare bar (MBIND_MOVE) or on a corner grab square (MBIND_RESIZE), waiting
+    // for the cursor to travel DRAG_THRESHOLD before the window starts following it.
+    bool               m_dragArmed  = false;
+    Vector2D           m_dragOrigin = {};
+    eMouseBindMode     m_dragMode   = MBIND_INVALID;
+    Layout::eRectCorner m_dragCorner = Layout::CORNER_NONE;
+    // Whether the compositor is currently dragging or resizing THIS window on our behalf.
+    bool               m_dragging   = false;
     // The bar's global box from the last draw(). Hover is tested against this rather than
     // recomputing outerBox() (five positioner lookups) on every mouse-move event.
     CBox        m_cachedBar = {};

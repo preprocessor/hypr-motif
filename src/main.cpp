@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include <hyprland/src/desktop/state/WindowState.hpp>
+#include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -120,6 +121,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             if (decoration.syncDrag(position) || decoration.syncHover(position))
                 decoration.damageBar();
         });
+    });
+
+    // The release of a drag or a corner resize, from the one listener that sees EVERY button
+    // event. A release that lands off the window never reaches onInputOnDeco, and nothing
+    // else retires a gesture the plugin started — the compositor ends its own drags from the
+    // mouse bind that owns them, and there is no bind here. Without this the window keeps
+    // following the cursor after the button is long gone.
+    static auto PB = Event::bus()->m_events.input.mouse.button.listen([](const IPointer::SButtonEvent& e, Event::SCallbackInfo&) {
+        // Only the button a gesture is armed with: a right-click release while the left one
+        // is still down must not end the drag.
+        if (e.button == BTN_LEFT && e.state == WL_POINTER_BUTTON_STATE_RELEASED)
+            forEachCdeDecoration([](CCdeDecoration& decoration, PHLWINDOW) { decoration.endGesture(); });
     });
 
     // Windows that already exist are not covered by the open event.
