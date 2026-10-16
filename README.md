@@ -1,0 +1,95 @@
+# hypr-CDE-borders
+
+Common Desktop Environment (Motif) window chrome for Hyprland
+
+Everything is drawn procedurally with Cairo at runtime — there are no image assets.
+
+![Motif title bar](examples/CDE-7.png)
+
+## Requirements
+
+Built and verified against **hyprland 0.56.2**. There is no ABI stability across the
+`dlopen` boundary: a plugin compiled against a different hyprland is rejected by, or takes
+down, the compositor. Build this from the same hyprland you run.
+
+## Install
+
+### hyprpm
+
+```
+hyprpm add https://github.com/wyspr/hypr-CDE-borders
+hyprpm enable cde
+```
+
+### From source
+
+```sh
+nix develop          # gcc 14.4, cmake, hyprland headers
+make                 # or: cmake -B build && cmake --build build
+```
+
+Load it with `hyprctl plugin load /path/to/cde.so`, or from your config:
+
+```ini
+plugin = /path/to/cde.so
+```
+
+## Config
+
+All options live under `plugin:cde`:
+
+```ini
+plugin {
+    cde {
+        bar_height = 22
+
+        # Inactive (unfocused) window
+        color_face = #999999
+        color_light = #d1d1d1
+        color_dark = #4e4e4e
+        color_title = #b0b0b0
+
+        # Active (focused) window
+        color_face_active = #eda870
+        color_light_active = #f7d9c0
+        color_dark_active = #7d593b
+        color_title_active = #ffffff
+
+        # Shared
+        color_title_shadow = #000000
+        title_font_size = 12
+        show_buttons = true
+    }
+}
+```
+
+| property | type | description | default |
+| --- | --- | --- | --- |
+| `bar_height` | int | title bar height in logical pixels, min 16 | `22` |
+| `color_face` | color | bar face colour, inactive window | `#999999` |
+| `color_light` | color | bevel highlight, inactive window | `#d1d1d1` |
+| `color_dark` | color | bevel shadow, inactive window | `#4e4e4e` |
+| `color_title` | color | title text, inactive window | `#b0b0b0` |
+| `color_face_active` | color | bar face colour, focused window | `#eda870` |
+| `color_light_active` | color | bevel highlight, focused window | `#f7d9c0` |
+| `color_dark_active` | color | bevel shadow, focused window | `#7d593b` |
+| `color_title_active` | color | title text, focused window | `#ffffff` |
+| `color_title_shadow` | color | the title's hard 1px drop shadow | `#000000` |
+| `title_font_size` | int | title size in points, min 6 | `12` |
+| `show_buttons` | bool | draw the three title bar buttons | `true` |
+
+## Interaction
+
+| where | what it does |
+| --- | --- |
+| bare bar | drag to move the window. This is the compositor's own drag, so `binds:drag_threshold`, float-on-drag, snapping and drag-into-group all apply as configured |
+| bottom corners | drag to resize |
+| left button | close the window |
+| middle button | toggle floating |
+| right button | fullscreen |
+
+Hovering or holding a button inverts its bevel (light and dark exchanged)
+
+**Buttons need `binds:pass_mouse_when_bound = true`** if you have a `mouse:272` bind —
+Hyprland consumes the press before the decoration sees it, and the buttons go dead. The
+same applies to dragging the bar.

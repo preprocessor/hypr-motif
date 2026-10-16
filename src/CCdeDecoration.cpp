@@ -1,5 +1,7 @@
 #include "CCdeDecoration.hpp"
 
+#include <algorithm>
+
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
@@ -11,13 +13,68 @@
 
 using namespace Hyprutils::Math;
 
+namespace {
+
+    // Every live decoration, as raw pointers. The destructor unregisters, so an entry only
+    // exists while the compositor still owns the object.
+    //
+    // Raw rather than weak because Hyprland takes these by UNIQUE pointer
+    // (addWindowDecoration, PluginAPI.hpp:265) and hyprutils cannot build a lockable weak
+    // pointer over one — lock() asserts and returns null (WeakPtr.hpp:180). hyprbars gets
+    // away with SP because it tracks Hyprland master, where the signature takes one.
+    std::vector<CCdeDecoration*>& registry() {
+        static std::vector<CCdeDecoration*> reg;
+        return reg;
+    }
+
+    // The box the compositor gave this decoration. const_cast because the positioner takes
+    // a non-const pointer even though it only reads.
+    CBox ownBox(const CCdeDecoration* decoration) {
+        return g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(decoration));
+    }
+
+} // namespace
+
 CCdeDecoration::CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name)
     : IHyprWindowDecoration(w)
     , m_window(w)
     , m_edge(edge)
-    , m_name(std::move(name)) {}
+    , m_name(std::move(name)) {
+    registry().push_back(this);
+}
 
-CCdeDecoration::~CCdeDecoration() = default;
+CCdeDecoration::~CCdeDecoration() {
+    auto& reg = registry();
+    reg.erase(std::remove(reg.begin(), reg.end(), this), reg.end());
+}
+
+void CCdeDecoration::forEach(const std::function<void(CCdeDecoration&, PHLWINDOW)>& fn) {
+    auto& reg = registry();
+    for (size_t i = 0; i < reg.size(); ++i)
+        fn(*reg[i], reg[i]->m_window.lock());
+}
+
+bool CCdeDecoration::windowHas(PHLWINDOW window, const std::string& name) {
+    // The COMPOSITOR's list, deliberately, not our registry. The registry only knows about
+    // decorations this copy of the plugin made, and the whole point of this check is to
+    // catch decorations left behind by a DIFFERENT, still-mapped copy — the stale-inode
+    // case in AGENTS.md gotcha 3. A registry-local check would wave that through and let
+    // two copies draw on top of each other. This runs once per window, so the scan costs
+    // nothing worth optimising.
+    for (const auto& d : window->m_windowDecorations)
+        if (d && d->getDisplayName() == name)
+            return true;
+    return false;
+}
+
+void CCdeDecoration::removeAll(HANDLE handle) {
+    // Backwards: the compositor's removeWindowDecoration destroys the object, and the
+    // destructor erases from the registry we are iterating.
+    auto& reg = registry();
+    for (size_t i = reg.size(); i > 0; --i)
+        HyprlandAPI::removeWindowDecoration(handle, reg[i - 1]);
+    reg.clear();
+}
 
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     const auto& cfg = CDE::config();
@@ -25,7 +82,7 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     SDecorationPositioningInfo info;
     info.policy   = DECORATION_POSITION_STICKY;
     info.edges    = m_edge;
-    info.priority = 10005; // outrank hyprland's own border decoration
+    info.priority = CDE::DECO_PRIORITY;
     info.reserved = true;
 
     // SBoxExtents.topLeft is {left, top}; bottomRight is {right, bottom}.
@@ -53,30 +110,50 @@ void CCdeDecoration::updateWindow(PHLWINDOW) {
     m_barTex.reset();
 }
 
-// The box the compositor gave one of our sibling strips, or {} when it has none yet.
-static CBox siblingBox(const PHLWINDOWREF& window, const char* name) {
-    for (const auto& d : window->m_windowDecorations)
-        if (d && d->getDisplayName() == name)
-            return g_pDecorationPositioner->getWindowDecorationBox(d.get());
-    return {};
-}
-
+// The window's outer rect, assembled from the boxes the compositor gave the four sibling
+// strips. This is what the corner grab squares are measured from.
 CBox CCdeDecoration::windowBox() const {
-    const CBox own      = g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(this));
-    const CBox topSib   = siblingBox(m_window, "CDE");
-    const CBox botSib   = siblingBox(m_window, "CDE:bottom");
-    const CBox leftSib  = siblingBox(m_window, "CDE:left");
-    const CBox rightSib = siblingBox(m_window, "CDE:right");
+    // ONE pass over the decoration list, not four. windowBox() runs about three times per
+    // decoration per frame (from textureIsCurrent, retexture and barBoxGlobal), so four
+    // scans of every decoration on the window was twelve per frame, all of it to find four
+    // boxes we already know the names of.
+    const CBox own = ownBox(this);
+    CBox        top, left, right, bottom;
+
+    for (const auto& d : m_window->m_windowDecorations) {
+        if (!d)
+            continue;
+
+        // Match the name BEFORE asking the positioner: getWindowDecorationBox is only
+        // meaningful for a decoration it placed, and this list holds other plugins'.
+        // Bound to a const reference, NOT a string_view: getDisplayName returns by value,
+        // so a string_view would dangle the moment the temporary died.
+        const std::string& name = d->getDisplayName();
+        if (name != CDE::DECO_BAR && name != CDE::DECO_LEFT && name != CDE::DECO_RIGHT && name != CDE::DECO_BOTTOM)
+            continue;
+
+        const CBox box = g_pDecorationPositioner->getWindowDecorationBox(d.get());
+
+        if (name == CDE::DECO_BAR)
+            top = box;
+        else if (name == CDE::DECO_LEFT)
+            left = box;
+        else if (name == CDE::DECO_RIGHT)
+            right = box;
+        else
+            bottom = box;
+    }
 
     // The outer span comes from the SIBLING decorations, never from our own box. `own` is
     // a different rectangle per edge — for the top it is the client box, for the left it
     // already starts at the window's outer edge — so re-expanding it uniformly pushes the
     // side frames a border further out than the client and leaves bare wallpaper between
-    // them. The compositor positions those boxes, so we read them directly.
-    const double winX      = leftSib.w > 0 ? leftSib.x : own.x;
-    const double winRight  = rightSib.w > 0 ? rightSib.x + rightSib.w : own.x + own.w;
-    const double winY      = topSib.h > 0 ? topSib.y : own.y;
-    const double winBottom = botSib.h > 0 ? botSib.y + botSib.h : own.y + own.h;
+    // them. The compositor positions those boxes, so we read them directly, and fall back
+    // to our own only while a sibling has not been placed yet.
+    const double winX      = left.w > 0 ? left.x : own.x;
+    const double winRight  = right.w > 0 ? right.x + right.w : own.x + own.w;
+    const double winY      = top.h > 0 ? top.y : own.y;
+    const double winBottom = bottom.h > 0 ? bottom.y + bottom.h : own.y + own.h;
 
     return {winX, winY, winRight - winX, winBottom - winY};
 }
@@ -88,12 +165,10 @@ CBox CCdeDecoration::outerBox() const {
         // Motif's title bar spans the FULL window width, frame bands included — that is
         // the whole point of it. Using the client width leaves wallpaper gaps in the
         // top corners.
-        case DECORATION_EDGE_TOP: {
+        case DECORATION_EDGE_TOP:
             // The bar's height is the positioner's answer for THIS decoration: on the top
             // edge our own box *is* the sibling the other three read.
-            const CBox own = g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(this));
-            return {win.x, win.y, win.w, own.h};
-        }
+            return {win.x, win.y, win.w, ownBox(this).h};
         // The side frames run the FULL height: alongside the bar as well as below it.
         case DECORATION_EDGE_LEFT: return {win.x, win.y, CDE::BORDER, win.h};
         case DECORATION_EDGE_RIGHT: return {win.x + win.w - CDE::BORDER, win.y, CDE::BORDER, win.h};
@@ -108,7 +183,7 @@ CBox CCdeDecoration::outerBox() const {
 // the press is an accident of iteration order — all four test the same two rects.
 Layout::eRectCorner CCdeDecoration::cornerAt(const Vector2D& globalPos) const {
     const CBox   win  = windowBox();
-    const double grab = CDE::cornerGrab();
+    const double grab = CDE::cornerGrab(CDE::config().barHeight);
 
     if (!win.w || !win.h)
         return Layout::CORNER_NONE;
@@ -143,11 +218,7 @@ void CCdeDecoration::damageBar() {
 
     // Expanded by 1px on each side: a shortfall shows as a stale sliver along the bar's
     // bottom or right edge.
-    CBox box = barBoxGlobal();
-    box.x -= 1;
-    box.y -= 1;
-    box.w += 2;
-    box.h += 2;
+    const CBox box = barBoxGlobal().expand(1).noNegativeSize();
     g_pHyprRenderer->damageBox(box);
 }
 
@@ -195,13 +266,14 @@ void CCdeDecoration::runButtonAction(int btn) {
 void CCdeDecoration::retexture(float scale) {
     // Raster at exactly the box draw() will use, so the texture and the geometry cannot
     // drift apart.
-    const CBox  box = outerBox();
-    const bool act = isActive();
+    const CBox         box = outerBox();
+    const bool         act = isActive();
+    const CDE::SConfig cfg = CDE::config();
 
     if (isTop())
-        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, CDE::config().titleFontSize, act);
+        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, cfg, act);
     else
-        m_barTex = CDE::renderBorder(m_edge, box.size(), scale, act);
+        m_barTex = CDE::renderBorder(m_edge, box.size(), scale, cfg, act);
 
     m_lastTitle   = m_window->m_title;
     m_lastScale   = scale;

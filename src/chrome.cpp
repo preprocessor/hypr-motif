@@ -24,15 +24,13 @@ namespace {
     //
     // The shadow is the one exception: it is NOT per-window. examples/title.png shows one
     // black shadow under both states, so a single colour serves both palettes.
-    SPalette currentPalette(bool active) {
-        const CDE::SConfig& c = CDE::config();
-
+    SPalette paletteFor(const CDE::SConfig& cfg, bool active) {
         SPalette p;
-        p.face   = active ? c.faceActive : c.face;
-        p.light  = active ? c.lightActive : c.light;
-        p.dark   = active ? c.darkActive : c.dark;
-        p.title  = active ? c.titleActive : c.title;
-        p.shadow = c.titleShadow;
+        p.face   = active ? cfg.faceActive : cfg.face;
+        p.light  = active ? cfg.lightActive : cfg.light;
+        p.dark   = active ? cfg.darkActive : cfg.dark;
+        p.title  = active ? cfg.titleActive : cfg.title;
+        p.shadow = cfg.titleShadow;
         return p;
     }
 
@@ -97,26 +95,35 @@ namespace {
     //   left   (outerIsHigh=false)  light(2) face(2) dark(1)
     //   right  (outerIsHigh=true)   light(1) face(2) dark(2)
     //   bottom (outerIsHigh=true)   light(1) face(2) dark(2)
-    void bevelBands(cairo_t* cr, double a, double b, double len, bool vertical, bool outerIsHigh, const SPalette& p) {
-        const double outwardLitW  = CDE::BORDER - CDE::FACE_BAND - CDE::SIDE; // the wide band
-        const double inwardLitW   = CDE::SIDE;                               // the narrow band
-        const double litW         = outerIsHigh ? inwardLitW : outwardLitW;
-        const double darkW        = CDE::BORDER - CDE::FACE_BAND - litW;
-        const double faceOffset   = litW;
-        const double darkOffset   = litW + CDE::FACE_BAND;
+    //
+    // The band widths are the same either way; only which end is lit differs. So this
+    // takes the band's three widths and an origin, and the two orientations below are
+    // the only things that know about x versus y. Keeping the arithmetic in one place is
+    // the point: it used to be inline in a function with a `vertical` flag, where
+    // transposing the two fill() calls by mistake produced a 1px lit COLUMN and silently
+    // cost the bottom frame its inner highlight.
+    struct SBevelBands {
+        double lit, face, dark;
+    };
 
-        if (vertical) {
-            fill(cr, a, b, litW, len, p.light);
-            fill(cr, a + faceOffset, b, CDE::FACE_BAND, len, p.face);
-            fill(cr, a + darkOffset, b, darkW, len, p.dark);
-        } else {
-            // Horizontal: `len` runs along x and the band widths along y. Swapping these
-            // draws the lit band as a 1px column, which leaves the bottom frame missing
-            // its inner highlight entirely.
-            fill(cr, a, b, len, litW, p.light);
-            fill(cr, a, b + faceOffset, len, CDE::FACE_BAND, p.face);
-            fill(cr, a, b + darkOffset, len, darkW, p.dark);
-        }
+    SBevelBands bevelBandsFor(bool outerIsHigh) {
+        const double wideLit = CDE::BORDER - CDE::FACE_BAND - CDE::SIDE; // the wide band
+        const double lit     = outerIsHigh ? CDE::SIDE : wideLit;
+        return {lit, CDE::FACE_BAND, CDE::BORDER - CDE::FACE_BAND - lit};
+    }
+
+    // Bands stacked along x, running down y. `x` is the outer edge of the strip.
+    void bevelBandsVertical(cairo_t* cr, double x, double y, double len, const SBevelBands& b, const SPalette& p) {
+        fill(cr, x, y, b.lit, len, p.light);
+        fill(cr, x + b.lit, y, b.face, len, p.face);
+        fill(cr, x + b.lit + b.face, y, b.dark, len, p.dark);
+    }
+
+    // Bands stacked along y, running across x. `y` is the outer edge of the strip.
+    void bevelBandsHorizontal(cairo_t* cr, double x, double y, double len, const SBevelBands& b, const SPalette& p) {
+        fill(cr, x, y, len, b.lit, p.light);
+        fill(cr, x, y + b.lit, len, b.face, p.face);
+        fill(cr, x, y + b.lit + b.face, len, b.dark, p.dark);
     }
 
     // The corners are MITRED, not overlapping rectangles. Measured 5x5 from CDE-7.png
@@ -181,21 +188,22 @@ namespace {
             }
     }
 
-    // A rule marking off the corner grab square on a frame strip. The lit pixel goes on
-    // local x=0 in both directions — the OUTER edge on the left strip, the inner one on
-    // the right, as the reference has it — so `darkOuter` keeps the outermost pixel of the
-    // second row dark where that matters.
-    void grabSeparator(cairo_t* cr, double a, double b, double len, bool horizontal, bool darkOuter, const SPalette& p) {
-        if (horizontal) {
-            fill(cr, a, b, 1, len, p.light);
-            fill(cr, a + 1, b, CDE::BORDER - 1, len, p.dark);
-            fill(cr, a, b + len, CDE::BORDER, 1, p.light);
-            if (darkOuter)
-                fill(cr, a + CDE::BORDER - 1, b + len, 1, 1, p.dark);
-        } else {
-            fill(cr, a, b + 1, 1, CDE::BORDER - 2, p.dark);
-            fill(cr, a + 1, b + 1, 1, CDE::BORDER - 2, p.light);
-        }
+    // A rule marking off the corner grab square on a frame strip, running ALONG x at
+    // height y. The lit pixel goes on local x=0, the outer edge on the left strip and the
+    // inner one on the right, so `darkOuter` keeps the outermost pixel of the second row
+    // dark where that matters.
+    void grabRuleAcross(cairo_t* cr, double x, double y, const SPalette& p, bool darkOuter) {
+        fill(cr, x, y, 1, CDE::SIDE, p.light);
+        fill(cr, x + 1, y, CDE::BORDER - 1, CDE::SIDE, p.dark);
+        fill(cr, x, y + CDE::SIDE, CDE::BORDER, CDE::SIDE, p.light);
+        if (darkOuter)
+            fill(cr, x + CDE::BORDER - 1, y + CDE::SIDE, 1, 1, p.dark);
+    }
+
+    // The same rule running ALONG y at column x, spanning the middle rows of the strip.
+    void grabRuleDown(cairo_t* cr, double x, double y, const SPalette& p) {
+        fill(cr, x, y + 1, 1, CDE::BORDER - 2, p.dark);
+        fill(cr, x + 1, y + 1, 1, CDE::BORDER - 2, p.light);
     }
 
     // Font options that make text hard-edged, per examples/title.png: no intermediate
@@ -215,15 +223,41 @@ namespace {
         return options;
     }
 
+    // The one texture-producing path, for both the bar and the frame strips: make a
+    // device-sized surface, hand a LOGICAL-pixel cairo context to `paint`, upload, free.
+    //
+    // The caller scales by `scale` and draws in logical pixels; the surface is
+    // `scale` times that, so nothing downstream has to think about device pixels.
+    SP<Render::ITexture> rasterise(Vector2D size, float scale, const std::function<void(cairo_t*)>& paint) {
+        const int surfaceW = std::max(1, sc<int>(size.x * scale));
+        const int surfaceH = std::max(1, sc<int>(size.y * scale));
+
+        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surfaceW, surfaceH);
+        cairo_t*         cr   = cairo_create(surf);
+        cairo_scale(cr, scale, scale);
+
+        paint(cr);
+
+        cairo_destroy(cr);
+
+        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
+        cairo_surface_destroy(surf);
+        return tex;
+    }
+
 } // namespace
 
 namespace CDE {
 
     // Size of the corner grab square: bar height minus one, from both reference data
-    // points (21 at a 22px bar, 24 at 25px). Floored at 6, below which the grab rules and
-    // the field separators overlap into mush. See AGENTS.md `## Corners`.
-    int cornerGrab() {
-        return std::max(6, config().barHeight - 1);
+    // points (21 at a 22px bar, 24 at 25px). Floored at MIN_CORNER_GRAB, below which the
+    // grab rules and the field separators overlap into mush. See AGENTS.md `## Corners`.
+    //
+    // Takes the bar height rather than reading config(): every caller already has it, and
+    // a geometry helper that quietly consults the config is how the same number ends up
+    // meaning two different things in one raster.
+    int cornerGrab(int barHeight) {
+        return std::max(MIN_CORNER_GRAB, barHeight - 1);
     }
 
     // A button field is a SQUARE sized by the bar: as wide as the field is tall. At the
@@ -236,18 +270,18 @@ namespace CDE {
     // Bar-relative x of the separator closing the close field: 21 at the reference's
     // 22px bar, tracking the field width as the bar grows.
     double leftFieldEnd(Vector2D size) {
-        return LEFT_SEP + SIDE * 2 + buttonFieldWidth(size);
+        return LEFT_SEP + SIDES_PAIRED + buttonFieldWidth(size);
     }
 
     // Bar-relative x where the right-hand field pair starts: width-40 at the reference's
     // 22px bar.
     double rightFieldStart(Vector2D size) {
-        return size.x - RIGHT_MARGIN - 2 * (buttonFieldWidth(size) + SIDE * 2);
+        return size.x - RIGHT_MARGIN - 2 * (buttonFieldWidth(size) + SIDES_PAIRED);
     }
 
     // The flexible region between the close field and the right pair.
     CBox titleFieldRect(Vector2D size) {
-        const double x = leftFieldEnd(size) + SIDE * 2;
+        const double x = leftFieldEnd(size) + SIDES_PAIRED;
         return {x, 0, std::max(0.0, rightFieldStart(size) - x), size.y};
     }
 
@@ -266,11 +300,11 @@ namespace CDE {
         // Close sits in the left field; float and max are the pair on the right, max second.
         double fieldX;
         if (btn == BTN_CLOSE)
-            fieldX = LEFT_SEP + SIDE * 2;
+            fieldX = LEFT_SEP + SIDES_PAIRED;
         else if (btn == BTN_MAX)
-            fieldX = rightFieldStart(size) + SIDE * 2 + fieldW + SIDE * 2;
+            fieldX = rightFieldStart(size) + SIDES_PAIRED + fieldW + SIDES_PAIRED;
         else
-            fieldX = rightFieldStart(size) + SIDE * 2;
+            fieldX = rightFieldStart(size) + SIDES_PAIRED;
 
         return {std::floor(fieldX), fieldTop, fieldW, fieldH};
     }
@@ -315,16 +349,17 @@ namespace CDE {
         fill(cr, 0, 0, size.x, size.y, p.face);
 
         fill(cr, 0, 0, size.x, BEVEL, p.light);
-        fill(cr, 0, BEVEL + 2, size.x, GROOVE, p.dark);
+        fill(cr, 0, GROOVE_TOP, size.x, GROOVE, p.dark);
         // The groove's light half starts right after its dark half, so this is
         // FIELD_TOP - GROOVE, not FIELD_TOP: the field begins only once both are drawn.
         fill(cr, 0, FIELD_TOP - GROOVE, size.x, GROOVE, p.light);
 
         // The bar's left and right ends ARE the frame's side bevels — the bar spans the
         // full window width, so these columns are shared with the side strips and must
-        // be painted by the same routine or the join shows.
-        bevelBands(cr, 0, BEVEL, size.y - BEVEL, true, false, p);
-        bevelBands(cr, size.x - CDE::BORDER, BEVEL, size.y - BEVEL, true, true, p);
+        // be painted by the same routine or the join shows. `false` on the left because
+        // its outer edge is the one facing away from the client.
+        bevelBandsVertical(cr, 0, BEVEL, size.y - BEVEL, bevelBandsFor(false), p);
+        bevelBandsVertical(cr, size.x - BORDER, BEVEL, size.y - BEVEL, bevelBandsFor(true), p);
 
         fill(cr, 0, size.y - SIDE, size.x, SIDE, p.dark);
     }
@@ -336,14 +371,14 @@ namespace CDE {
         if (LEFT_SEP >= rightFieldX)
             return;
 
-        const double sepTop   = FIELD_TOP;
-        const double sepH     = size.y - sepTop - SIDE;
-        const double fieldW   = buttonFieldWidth(size);
+        const double sepTop = FIELD_TOP;
+        const double sepH   = size.y - sepTop - SIDE;
+        const double fieldW = buttonFieldWidth(size);
 
         separator(cr, LEFT_SEP, sepTop, sepH, p);
         separator(cr, leftFieldEnd(size), sepTop, sepH, p);
         separator(cr, rightFieldX, sepTop, sepH, p);
-        separator(cr, rightFieldX + fieldW + SIDE * 2, sepTop, sepH, p);
+        separator(cr, rightFieldX + fieldW + SIDES_PAIRED, sepTop, sepH, p);
         separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
     }
 
@@ -352,31 +387,36 @@ namespace CDE {
     // start below the bevel — and they land on the same columns as two of those, so
     // drawing them separately is the only way to reach further without widening them.
     // The groove's light row breaks them, as in the reference, hence the two spans.
-    void drawCornerGrabRules(cairo_t* cr, Vector2D size, const SPalette& p) {
-        const int grab = cornerGrab();
-        // Below this width the two rules would collide, so a narrow window gets none.
-        if (size.x <= grab * 2 + 4)
+    void drawCornerGrabRules(cairo_t* cr, Vector2D size, const SPalette& p, int barHeight) {
+        const int grab = cornerGrab(barHeight);
+
+        // Each rule is a dark+light pair SIDES_PAIRED wide, inset `grab` from its own edge.
+        // They collide once the two spans touch, so a window narrower than that gets none.
+        if (size.x <= grab * 2 + SIDES_PAIRED * 2)
             return;
 
-        const double aboveTop = 1;                      // first row of the rule
-        const double aboveBot = BEVEL + GROOVE + 1;     // last row of the upper span, inclusive
-        const double belowTop = aboveBot + GROOVE + 1;  // first row after the groove's light row
+        // The upper span starts one row in, below the outer bevel, and ends ON the groove's
+        // dark row. The lower one picks up under the groove's light row, so the light row
+        // is a deliberate 1px gap in the rule — the reference breaks it there.
+        const double upperTop = SIDE;
+        const double upperEnd = GROOVE_TOP;
+        const double lowerTop = FIELD_TOP;
 
         auto drawRule = [&](double x) {
-            separator(cr, x, aboveTop, aboveBot - aboveTop + 1, p);
-            separator(cr, x, belowTop, size.y - belowTop, p);
+            separator(cr, x, upperTop, upperEnd - upperTop + SIDE, p);
+            separator(cr, x, lowerTop, size.y - lowerTop, p);
         };
 
         drawRule(grab);
-        drawRule(size.x - grab - 2);
+        drawRule(size.x - grab - SIDES_PAIRED);
     }
 
     // The three buttons. Hover and held both read as INSET: the lit edge moves to the
     // bottom/right, the opposite of raised. Hover is deliberately NOT a wash of colour
     // across the field — that flattens the bevel and reads as a patch sitting on the bar
     // rather than as part of it.
-    void drawButtons(cairo_t* cr, Vector2D size, int hovered, int pressed, const SPalette& palette) {
-        if (!config().showButtons)
+    void drawButtons(cairo_t* cr, Vector2D size, int hovered, int pressed, const SPalette& palette, bool showButtons) {
+        if (!showButtons)
             return;
 
         for (int b = 0; b < BTN_COUNT; ++b) {
@@ -386,7 +426,7 @@ namespace CDE {
                 continue;
 
             const bool      highlighted = hovered == b || pressed == b;
-            const SPalette p = highlighted ? inverted(palette) : palette;
+            const SPalette p            = highlighted ? inverted(palette) : palette;
 
             // The highlight covers the FIELD — the whole square the user clicks — not the
             // glyph. The glyph is a small fixed size inside a square that grows with the
@@ -468,7 +508,7 @@ namespace CDE {
 
         const double fieldTop = FIELD_TOP;
         const double fieldH   = size.y - fieldTop - SIDE;
-        const double painted  = DRAG_RULE_LINES * (SIDE * 2); // a light row plus its shadow
+        const double painted  = DRAG_RULE_LINES * SIDES_PAIRED; // a light row plus its shadow
         const double slack    = fieldH - painted;
 
         // Too little band to hold the stack plus a face row above and below it: no rules at
@@ -496,7 +536,7 @@ namespace CDE {
                 return;
 
             for (int line = 0; line < DRAG_RULE_LINES; ++line) {
-                const double y = fieldTop + edgeGap + line * (SIDE * 2 + DRAG_RULE_STACK_GAP);
+                const double y = fieldTop + edgeGap + line * (SIDES_PAIRED + DRAG_RULE_STACK_GAP);
                 fill(cr, x, y, w, SIDE, p.light);
                 fill(cr, x + DRAG_RULE_SHADOW_DX, y + SIDE, w, SIDE, p.dark);
             }
@@ -506,27 +546,16 @@ namespace CDE {
         rule(textEnd, fieldEnd - textEnd);
     }
 
-    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, int fontSize, bool active) {
-        const int surfaceW = std::max(1, sc<int>(size.x * scale));
-        const int surfaceH = std::max(1, sc<int>(size.y * scale));
+    SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, const SConfig& cfg, bool active) {
+        const SPalette p = paletteFor(cfg, active);
 
-        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surfaceW, surfaceH);
-        cairo_t*         cr   = cairo_create(surf);
-        cairo_scale(cr, scale, scale); // draw in logical pixels; the surface is device-sized
-
-        const SPalette p = currentPalette(active);
-
-        drawBarBackground(cr, size, p);
-        drawFieldSeparators(cr, size, p);
-        drawCornerGrabRules(cr, size, p);
-        drawButtons(cr, size, hovered, pressed, p);
-        drawDragRules(cr, size, drawTitle(cr, size, title, fontSize, p), p);
-
-        cairo_destroy(cr);
-
-        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
-        cairo_surface_destroy(surf);
-        return tex;
+        return rasterise(size, scale, [&](cairo_t* cr) {
+            drawBarBackground(cr, size, p);
+            drawFieldSeparators(cr, size, p);
+            drawCornerGrabRules(cr, size, p, cfg.barHeight);
+            drawButtons(cr, size, hovered, pressed, p, cfg.showButtons);
+            drawDragRules(cr, size, drawTitle(cr, size, title, cfg.titleFontSize, p), p);
+        });
     }
 
     // Paints one edge of the window frame: the bevel bands, then the two mitred corners
@@ -536,51 +565,44 @@ namespace CDE {
     // height so they take the top pair (painting over the bar's top rows, which is what
     // makes the bevel read as spanning the full width), and the bottom strip is drawn last
     // so it takes the bottom pair. No reordering needed.
-    void drawFrameStrip(cairo_t* cr, uint32_t edge, Vector2D size, const SPalette& p) {
+    void drawFrameStrip(cairo_t* cr, uint32_t edge, Vector2D size, const SPalette& p, int barHeight) {
         // The grab square is measured along the BAR's height, so the same value marks the
         // grab square here as it does on the bar.
-        const int grab = cornerGrab();
+        const int grab = cornerGrab(barHeight);
 
         switch (edge) {
-            case DECORATION_EDGE_LEFT: bevelBands(cr, 0, 0, size.y, true, false, p); break;
-            case DECORATION_EDGE_RIGHT: bevelBands(cr, 0, 0, size.y, true, true, p); break;
-            case DECORATION_EDGE_BOTTOM: bevelBands(cr, 0, 0, size.x, false, true, p); break;
-            default: return;
-        }
+            case DECORATION_EDGE_LEFT:
+                bevelBandsVertical(cr, 0, 0, size.y, bevelBandsFor(false), p);
+                drawCorner(cr, 0, 0, TL, p);
+                // One rule at each end. The top one lands on the bar's bottom edge.
+                grabRuleAcross(cr, 0, grab, p, false);
+                grabRuleAcross(cr, 0, size.y - grab - SIDES_PAIRED, p, false);
+                break;
 
-        if (edge == DECORATION_EDGE_LEFT) {
-            drawCorner(cr, 0, 0, TL, p);
-            // Horizontal rule at each end. The top one lands on the bar's bottom edge.
-            grabSeparator(cr, 0, grab, 1, true, false, p);
-            grabSeparator(cr, 0, size.y - grab - 2, 1, true, false, p);
-        } else if (edge == DECORATION_EDGE_RIGHT) {
-            drawCorner(cr, 0, 0, TR, p);
-            grabSeparator(cr, 0, grab, 1, true, true, p);
-            grabSeparator(cr, 0, size.y - grab - 2, 1, true, true, p);
-        } else {
-            drawCorner(cr, 0, 0, BL, p);
-            drawCorner(cr, size.x - CDE::BORDER, 0, BR, p);
-            // Vertical rule, spanning the middle rows of the strip.
-            grabSeparator(cr, grab, 0, 0, false, true, p);
-            grabSeparator(cr, size.x - grab - 2, 0, 0, false, true, p);
+            case DECORATION_EDGE_RIGHT:
+                bevelBandsVertical(cr, 0, 0, size.y, bevelBandsFor(true), p);
+                drawCorner(cr, 0, 0, TR, p);
+                // `true`: on this strip the outermost pixel is the dark one.
+                grabRuleAcross(cr, 0, grab, p, true);
+                grabRuleAcross(cr, 0, size.y - grab - SIDES_PAIRED, p, true);
+                break;
+
+            case DECORATION_EDGE_BOTTOM:
+                bevelBandsHorizontal(cr, 0, 0, size.x, bevelBandsFor(true), p);
+                drawCorner(cr, 0, 0, BL, p);
+                drawCorner(cr, size.x - BORDER, 0, BR, p);
+                // The vertical rules, spanning the middle rows of the strip.
+                grabRuleDown(cr, grab, 0, p);
+                grabRuleDown(cr, size.x - grab - SIDES_PAIRED, 0, p);
+                break;
+
+            default: return;
         }
     }
 
-    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, bool active) {
-        const int surfaceW = std::max(1, sc<int>(size.x * scale));
-        const int surfaceH = std::max(1, sc<int>(size.y * scale));
-
-        cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surfaceW, surfaceH);
-        cairo_t*         cr   = cairo_create(surf);
-        cairo_scale(cr, scale, scale);
-
-        drawFrameStrip(cr, edge, size, currentPalette(active));
-
-        cairo_destroy(cr);
-
-        SP<Render::ITexture> tex = g_pHyprRenderer->createTexture(surf);
-        cairo_surface_destroy(surf);
-        return tex;
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active) {
+        const SPalette p = paletteFor(cfg, active);
+        return rasterise(size, scale, [&](cairo_t* cr) { drawFrameStrip(cr, edge, size, p, cfg.barHeight); });
     }
 
 } // namespace CDE

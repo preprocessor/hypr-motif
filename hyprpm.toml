@@ -1,0 +1,11 @@
+[repository]
+name = "hypr-CDE-borders"
+authors = ["wyspr"]
+
+[cde]
+description = "Common Desktop Environment (Motif) window chrome for Hyprland"
+authors = ["wyspr"]
+output = "cde.so"
+build = [
+    "make all",
+]

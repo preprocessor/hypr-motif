@@ -9,6 +9,9 @@ namespace CDE {
 
     struct SConfig {
         int        barHeight      = CDE::BAR_HEIGHT;
+        bool       showButtons    = true;
+        int        titleFontSize  = CDE::TITLE_FONT_SIZE;
+
         // Inactive (unfocused) window.
         CHyprColor face           = {0.600, 0.600, 0.600, 1};
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
@@ -28,9 +31,6 @@ namespace CDE {
         CHyprColor lightActive    = {0.969, 0.851, 0.753, 1};
         CHyprColor darkActive     = {0.490, 0.349, 0.231, 1};
         CHyprColor titleActive    = {1.000, 1.000, 1.000, 1};
-
-        bool       showButtons    = true;
-        int        titleFontSize  = 12;
     };
 
     // Registers every plugin:cde: value. Must be called from pluginInit.

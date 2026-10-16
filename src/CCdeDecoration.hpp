@@ -2,7 +2,9 @@
 
 #define WLR_USE_UNSTABLE
 
+#include <functional>
 #include <string>
+#include <vector>
 
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/helpers/Color.hpp>
@@ -25,6 +27,35 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // `edge` is an eDecorationEdges value. Exactly one deco per edge per window.
     CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name);
     ~CCdeDecoration() override;
+
+    // Runs `fn` for every live decoration, with the window it belongs to.
+    //
+    // This replaces walking every window's decoration list and dynamic_cast-ing each
+    // entry, which the three event listeners in main.cpp all used to do — on every mouse
+    // move, across every decoration on the compositor, ours and other plugins'.
+    //
+    // INVARIANT: `fn` must not destroy a decoration, because the loop indexes the
+    // registry directly. All three callers only sync state — invalidate/onWindowUpdate,
+    // syncDrag/syncHover/damageBar, endGesture — and none of those removes an object.
+    // That is also why the one place that DOES destroy a window, runButtonAction, is
+    // reached from onInputOnDeco and not from here. If a listener ever needs to close a
+    // window, copy the registry first or this will walk a freed slot.
+    static void forEach(const std::function<void(CCdeDecoration&, PHLWINDOW)>& fn);
+
+    // Whether `window` already carries one of ours called `name`, which is what makes
+    // onNewWindow idempotent. Deliberately scans the compositor's decoration list rather
+    // than the registry above — see the definition.
+    static bool windowHas(PHLWINDOW window, const std::string& name);
+
+    // Unregisters every decoration and asks the compositor to drop it. Called from
+    // PLUGIN_EXIT only, with the plugin's own handle.
+    //
+    // Without this the decorations outlive the unload: addWindowDecoration hands them to
+    // Hyprland, which keeps the shared object mapped for as long as it holds one, so a
+    // freshly built copy loaded afterwards is skipped by the duplicate check in
+    // onNewWindow and the OLD code keeps drawing. That is the stale-inode trap in
+    // AGENTS.md gotcha 3, and it makes "build, load, look" silently test nothing.
+    static void removeAll(HANDLE handle);
 
     SDecorationPositioningInfo getPositioningInfo() override;
     void                       onPositioningReply(const SDecorationPositioningReply& reply) override;

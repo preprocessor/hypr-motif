@@ -35,6 +35,17 @@ Human-readable and self-documenting beats clever. The rules that actually apply 
 - **Delete dead code rather than commenting it.** `FIELD_W`, `CORNER_GRAB_REF`,
   `m_dragStart` and the never-drawn `color_highlight` were all removed once the sizes they
   referenced became derived; a constant that nothing reads is a lie about the design.
+- **Pass the config in; never read it from a drawing helper.** `paletteFor`,
+  `drawButtons`, `cornerGrab` and `renderBar`/`renderBorder` all take `const SConfig&`
+  rather than calling `CDE::config()` themselves. A geometry helper that quietly consults
+  global config hides where a pixel's value came from, and costs a full config read per
+  raster. The caller already has it; pass it.
+- **Do not dispatch an axis with a bool if it changes the argument order.** `bevelBands` and
+  `grabSeparator` both took a `vertical`/`horizontal` flag over `(x, y, len)` and needed a
+  comment explaining that transposing the `fill()` calls by mistake produced a 1px lit
+  column. They are now `bevelBandsVertical`/`bevelBandsHorizontal` and
+  `grabRuleAcross`/`grabRuleDown`. A trap that needs a comment to explain is a shape that
+  should be split.
 
 **Refactors must be pixel-neutral.** `renderBar`/`renderBorder` are the only things that
 decide what a pixel looks like, so reorganising them is safe *only* if verified: screenshot
@@ -52,13 +63,17 @@ cp build/libcde.so build/libcde-next.so              # fresh path — see gotcha
 hyprctl plugin unload ~/.local/share/hyprland/plugins/libcde-old.so
 hyprctl plugin load ~/.local/share/hyprland/plugins/libcde-next.so
 hyprctl plugin list | grep -c "Plugin cde"            # must be 1
+nix build .#default                                 # packaging, needs a tracked tree
+nix flake check                                      # asserts hyprland == 0.56.2
 ```
+
+`flake.nix` pins `nixpkgs-unstable`, yielding **hyprland 0.56.2**, `aquamarine 0.15.1`,
+`cairo 1.18.4`. Treat those versions as exact. `checks.x86_64-linux.cde` is an
+`assert pkgs.hyprland.version == "0.56.2"` — it fails the moment the pin drifts, which is
+the one ABI failure a test on running code would not catch.
 
 Build to a **new filename** every time — never over the one you are loading. The
 compositor keeps the old inode mapped and silently runs stale code.
-
-`flake.nix` pins `nixpkgs-unstable`, yielding **hyprland 0.56.2**, `aquamarine 0.15.1`,
-`cairo 1.18.4**. Treat those versions as exact.
 
 **Testing clicks.** There is no `xdotool`/`ydotool`/`wlrctl` on this box, and `hyprctl
 dispatch movecursor 37,36` fails under a Lua config (`hl.dispatch(movecursor 37 36)` is a
@@ -108,12 +123,15 @@ default stdenv. If you bump `flake.lock`, rebuild before touching your running s
 
 ```
 src/main.cpp           plugin entry: pluginAPIVersion / pluginInit / pluginExit
-src/CCdeDecoration.hpp IHyprWindowDecoration subclass — declaration
+src/CCdeDecoration.hpp IHyprWindowDecoration subclass — declaration, the registry
 src/CCdeDecoration.cpp positioning, draw(), input handling
 src/config.hpp         config struct, generation counter
 src/config.cpp         plugin:cde:* registration + live read
-src/chrome.hpp         layout constants, button rects, Cairo entry points
+src/chrome.hpp         layout constants, Cairo entry points
 src/chrome.cpp         Cairo drawing of the bevels, bar, corners and glyphs
+tools/verify-pixels.sh the pixel-neutrality driver (`## Verification`)
+tools/capture-bars.sh bar-row screenshots; tools/set-bar-height.sh bar_height driver
+README.md              user-facing config docs
 ```
 
 **Build wiring — do not hand-roll include directories.** `hyprland.pc` already exists and
@@ -123,6 +141,14 @@ pulls cairo transitively, so CMake needs exactly:
 pkg_check_modules(HYPRLAND REQUIRED IMPORTED_TARGET hyprland)
 target_link_libraries(cde PRIVATE PkgConfig::HYPRLAND)
 ```
+
+**Three build systems, because three consumers need three things.** `CMakeLists.txt` is
+the real one and what the flake uses — it is the only one with `install(TARGETS)`, which is
+what makes nixpkgs' install phase put the `.so` in `$out/lib`. `Makefile` exists because
+hyprpm runs `make all` and reads `cde.so` straight out of the source tree
+(`hyprpm.toml`); it deliberately has **no** `install` target, matching hyprbars.
+`meson.build` is for meson users. Keep the source list in `meson.build` explicit rather
+than globbed — it is four files and a glob would silently survive a rename.
 
 ## Architecture
 
@@ -175,6 +201,70 @@ Gaps, in the order they bite:
   `## Bar height`. A `hyprctl eval 'hl.config(...)'` alone will not do it.
 - The active border still double-draws — see `## Known unknown`.
 - Buttons work only when **no mouse binding consumes the press**. See `## Button input`.
+
+## Verification
+
+Nothing in this codebase is unit-testable — the chrome is Cairo drawing decisions whose
+whole specification is the pixel comparisons in `examples/`. So "verified" means **the bars
+of every visible window, at two or three `bar_height` values, byte-identical before and
+after**.
+
+The working harness is `tools/verify-pixels.sh`, wrapping `tools/capture-bars.sh` and
+`tools/set-bar-height.sh`. What the capture does, and why each part matters:
+
+- **Crops only the bar rows, never a full screenshot.** `hyprctl clients` `at` is the
+  CLIENT rect — the frame has already reserved space, so the bar occupies `[y-bar_height,
+  y)`. A full screenshot is never diffable here anyway: this session has a video window.
+- **Exactly `bar_height` rows tall.** Rows below that are client content, which moves on its
+  own and would show up as a false difference.
+- **Sorts the window list by `(y, x, w, class)`** and names files by that index.
+  `hyprctl clients` order is NOT stable between calls, so unsorted names mean the diff
+  compares window A to window B and reports noise.
+- Verified reproducible: three consecutive runs were byte-identical.
+
+```sh
+tools/verify-pixels.sh baseline     # with the OLD build loaded
+# ...build, load the new code (gotcha 3)...
+tools/verify-pixels.sh compare      # captures again and diffs
+```
+
+**Three ways this comparison lies, all of them handled in the script, all hit in
+practice:**
+
+1. If the set of windows or their positions changed between the baseline and the after, the
+   indices no longer line up. Both modes fingerprint `hyprctl clients -j` and `compare`
+   refuses rather than reporting a diff it cannot justify.
+2. If a **second copy** of the plugin is mapped, you are diffing the old build against
+   itself and every pixel matches. `compare` counts the mapped `libcde-*.so` and refuses on
+   more than one. See gotcha 3.
+3. If the plugin was never unloaded, `plugin load` finds the old decorations already in
+   place, skips its own, and the "after" is still the old code — a green diff of nothing.
+   That is the one failure this harness cannot detect from inside itself; check
+   `hyprctl plugin list | grep -c "Plugin cde"` == 1 and that the mapped path is the one
+   you just loaded.
+
+`tools/set-bar-height.sh` edits `bar_height` in `~/.config/hypr/dynamic.lua` and runs
+`hyprctl reload`, because that file's `config.reloaded` handler re-asserts the value — an
+eval alone gets overridden (see `## Bar height`). It backs the config up and restores it on
+exit.
+
+Beyond the diff, on the dark palette the bar must contain exactly four colours — face,
+light, dark and the title. Intermediate greys mean antialiasing crept back into the title.
+
+**A headless renderer is not possible here, and it was tried.** Compiling the painters
+outside the compositor would remove every source of flake from this check, so it is worth
+recording why it does not work. `chrome.cpp` reaches the compositor in exactly two includes:
+`render/Renderer.hpp` for `g_pHyprRenderer` (used only by `rasterise`) and
+`render/decorations/DecorationPositioner.hpp` for `eDecorationEdges`. Stubbing both is easy.
+The blocker is `helpers/Color.hpp`, which reaches `helpers/cm/ColorManagement.hpp` via
+`macros.hpp`; that header's namespace-scope inline initialisers call
+`NColorManagement::getPrimaries` and `CImageDescription::from`, which are defined in the
+compositor binary. Hyprland ships **no linkable library** — plugins resolve those symbols
+against the running process at `dlopen` time — so there is nothing to link against, and
+leaving them undefined segfaults before `main()`. `CHyprColor`'s three constructors are the
+same story. The gcc pin makes it worse rather than better: the devshell is gcc14 for ABI
+reasons while hyprland's own libraries are built with gcc16, so a harness additionally needs
+a different libstdc++ at both link and run time.
 
 ## References, and how to measure them
 
@@ -280,7 +370,8 @@ right frame:  LDDDD   then  LLLLD
 The lit pixel sits at local x=0 on both — the *outer* edge on the left strip, the *inner*
 one on the right, so on a dark-outer strip the outermost pixel of row two stays dark.
 
-`CORNER_GRAB` is **derived from the bar height**, not fixed: `cornerGrab() = max(6, barHeight - 1)`.
+`CORNER_GRAB` is **derived from the bar height**, not fixed:
+`cornerGrab(barHeight) = max(MIN_CORNER_GRAB, barHeight - 1)`.
 Two reference data points agree on the relation — CDE-7's grab is 21 with a 22px bar,
 new-standard.png's is 24 with a 25px bar. Both are `BAR_HEIGHT - 1`, so it scales with
 `plugin:cde:bar_height`; `CORNER_GRAB_REF` in `chrome.hpp` is only the measured value for
@@ -497,7 +588,8 @@ them together rather than stretching the chrome.
 ## Config options
 
 All namespaced `plugin:cde:`, registered with `addConfigValueV2` in `src/config.cpp`, set
-under `hl.config({ plugin = { cde = { ... } } })`.
+under `hl.config({ plugin = { cde = { ... } } })`. User-facing docs are in `README.md`;
+this table is the same list.
 
 | Key | Type | Default |
 |---|---|---|
@@ -505,7 +597,6 @@ under `hl.config({ plugin = { cde = { ... } } })`.
 | `color_face` | colour | `#999999` |
 | `color_light` | colour | `#d1d1d1` |
 | `color_dark` | colour | `#4e4e4e` |
-| `color_highlight` | colour | `#ffffff` |
 | `show_buttons` | bool | `true` |
 | `color_title` | colour | `#b0b0b0` |
 | `color_title_shadow` | colour | `#000000` |
@@ -514,6 +605,9 @@ under `hl.config({ plugin = { cde = { ... } } })`.
 | `color_light_active` | colour | `#f7d9c0` |
 | `color_dark_active` | colour | `#7d593b` |
 | `color_title_active` | colour | `#ffffff` |
+
+There is no `color_highlight`: it was removed as never-drawn. `MIN_BAR_HEIGHT` (16) and
+`MIN_TITLE_FONT_SIZE` (6) live in `chrome.hpp` and are the clamps `config()` applies.
 
 Un-suffixed colours apply to **unfocused** windows, `_active` to the focused one. The
 active face/light/dark are measured from new-standard.png.
@@ -536,6 +630,15 @@ Two constraints on implementing these:
 - `CColorValue::value()` returns a packed integer; `CHyprColor(uint64_t)` consumes it.
 
 ## The four things that will waste your day
+
+**0. An event listener that is not released outlives the plugin.** `Event::bus()` holds
+only a `CWeakPointer` to a listener (`Signal.hpp:21`) and `listen()` hands back the last
+strong one (`Listener.hpp:29`). The idiom hyprbars uses — `static auto P = ...listen(...)` —
+does keep it alive, but it keeps it alive *forever*: the reference doing the decrement lives
+in a `.bss` that `dlclose` unmaps, so the signal stays registered with a `std::function`
+handler pointing into freed code, and the next emit segfaults. `main.cpp` holds the five
+handles in `g_listeners` and `PLUGIN_EXIT` clears it, which is the only moment the handlers
+can be destroyed safely. Do not "simplify" that back into a `static`.
 
 **1. `draw()` cannot touch the framebuffer.** No GL context is current inside it.
 `g_pHyprOpenGL->renderTexture()` there compiles, runs, and draws *nothing* — no error, no
@@ -571,12 +674,28 @@ placement define the ring. `draw()`, `retexture()` and hit-testing all call it: 
 rastered at one size and stretched over another puts the separators out of register with
 the buttons.
 
-**3. Rebuilding over the same path does not reload.** `unload` + `load` on a rebuilt
-`build/libcde.so` silently keeps running the **old** code — the compositor holds the
-previous, now-deleted inode. Build, `cp` to a new name, load the new path. Verify with
+**3. Rebuilding over the same path does not reload — and unloading used to leave the
+decorations behind.** `unload` + `load` on a rebuilt `build/libcde.so` silently keeps
+running the **old** code — the compositor holds the previous, now-deleted inode. Build,
+`cp` to a new name, load the new path. Verify with
 `grep -o "libcde[a-z0-9.-]*\.so" /proc/$(pgrep -f "bin/Hyprland" | head -1)/maps` — it
 shows `(deleted)` when you have been fooled, and more than one `libcde-*.so` means two
 copies are fighting over the same decorations.
+
+`PLUGIN_EXIT` now calls `CCdeDecoration::removeAll`, which is what actually makes
+`plugin unload` mean unload. **Measured, before and after:** a build without it left its
+four decorations per window in `m_windowDecorations` on unload, which kept the `.so` mapped
+for the rest of the session — so the *next* `plugin load` found the display names already
+present, skipped adding its own, and the screen kept showing the old build with `plugin list`
+reporting `1`. Building and loading a new copy tested nothing at all. Now:
+
+- decorations are removed before the handle goes away, so the mapping is released;
+- `plugin unload` then `plugin load` really does run the new code;
+- **a plugin built before this change can still be stuck in that state.** Its decorations
+  belong to a `.so` that is already unmapped-by-policy and no longer loadable, so no
+  `removeWindowDecoration` can be issued for them. Recovery is closing the windows (their
+  decorations die with them, dropping the refcount) or restarting Hyprland. Treat "the bars
+  still look like the old build after a reload" as this, not as a caching bug.
 
 **A half-unloaded copy leaves a ZOMBIE that looks alive.** Symptom set, all measured in one
 session: the bar drew **doubled** text, the title **stopped updating**, and
@@ -668,9 +787,11 @@ in-process, take the window explicitly (so a click on an unfocused window's bar 
 *that* window), and work under both config backends. Note there is **no `minimize`
 dispatcher or action at all** in 0.56.2 — hence the middle button being float, not minimize.
 
-**Hit-test the FIELD, not the glyph.** `CDE::buttonAt` / `buttonFieldRect` own the
-geometry and the test together, so they cannot drift; the glyph (9x4 on close) is far too
-small a target and made clicks feel spotty.
+**Hit-test the FIELD, not the glyph.** `CDE::buttonAt` and the rects beside it in
+`chrome.cpp` own the geometry and the test together, so they cannot drift; the glyph (9x4
+on close) is far too small a target and made clicks feel spotty. Only `buttonAt` is
+exported in `chrome.hpp` — the rects are internal, and handing out raw geometry is what let
+the two lists drift apart in the first place.
 
 **Hover swaps the bevel, it does not wash the background.** A flat highlight fill across
 the field flattens the bevel and reads as a mis-coloured patch sitting *on* the bar rather
