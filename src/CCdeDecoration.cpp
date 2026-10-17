@@ -14,14 +14,6 @@
 using namespace Hyprutils::Math;
 
 namespace {
-
-    // Every live decoration, as raw pointers. The destructor unregisters, so an entry only
-    // exists while the compositor still owns the object.
-    //
-    // Raw rather than weak because Hyprland takes these by UNIQUE pointer
-    // (addWindowDecoration, PluginAPI.hpp:265) and hyprutils cannot build a lockable weak
-    // pointer over one — lock() asserts and returns null (WeakPtr.hpp:180). hyprbars gets
-    // away with SP because it tracks Hyprland master, where the signature takes one.
     std::vector<CCdeDecoration*>& registry() {
         static std::vector<CCdeDecoration*> reg;
         return reg;
@@ -33,7 +25,7 @@ namespace {
         return g_pDecorationPositioner->getWindowDecorationBox(const_cast<CCdeDecoration*>(decoration));
     }
 
-} // namespace
+}
 
 CCdeDecoration::CCdeDecoration(PHLWINDOW w, uint32_t edge, std::string name)
     : IHyprWindowDecoration(w)
@@ -55,12 +47,10 @@ void CCdeDecoration::forEach(const std::function<void(CCdeDecoration&, PHLWINDOW
 }
 
 bool CCdeDecoration::windowHas(PHLWINDOW window, const std::string& name) {
-    // The COMPOSITOR's list, deliberately, not our registry. The registry only knows about
-    // decorations this copy of the plugin made, and the whole point of this check is to
-    // catch decorations left behind by a DIFFERENT, still-mapped copy — the stale-inode
-    // case in AGENTS.md gotcha 3. A registry-local check would wave that through and let
-    // two copies draw on top of each other. This runs once per window, so the scan costs
-    // nothing worth optimising.
+    // The compositor's list, not our registry. The registry only knows this copy's
+    // decorations, and catching the ones left by a DIFFERENT still-mapped copy is the
+    // whole point — a registry-local check would wave those through and let two copies
+    // draw on top of each other. Runs once per window, so the scan costs nothing.
     for (const auto& d : window->m_windowDecorations)
         if (d && d->getDisplayName() == name)
             return true;
@@ -68,8 +58,8 @@ bool CCdeDecoration::windowHas(PHLWINDOW window, const std::string& name) {
 }
 
 void CCdeDecoration::removeAll(HANDLE handle) {
-    // Backwards: the compositor's removeWindowDecoration destroys the object, and the
-    // destructor erases from the registry we are iterating.
+    // Backwards: removeWindowDecoration destroys the object, and the destructor erases
+    // from the registry being iterated.
     auto& reg = registry();
     for (size_t i = reg.size(); i > 0; --i)
         HyprlandAPI::removeWindowDecoration(handle, reg[i - 1]);
@@ -113,10 +103,6 @@ void CCdeDecoration::updateWindow(PHLWINDOW) {
 // The window's outer rect, assembled from the boxes the compositor gave the four sibling
 // strips. This is what the corner grab squares are measured from.
 CBox CCdeDecoration::windowBox() const {
-    // ONE pass over the decoration list, not four. windowBox() runs about three times per
-    // decoration per frame (from textureIsCurrent, retexture and barBoxGlobal), so four
-    // scans of every decoration on the window was twelve per frame, all of it to find four
-    // boxes we already know the names of.
     const CBox own = ownBox(this);
     CBox        top, left, right, bottom;
 
@@ -124,10 +110,6 @@ CBox CCdeDecoration::windowBox() const {
         if (!d)
             continue;
 
-        // Match the name BEFORE asking the positioner: getWindowDecorationBox is only
-        // meaningful for a decoration it placed, and this list holds other plugins'.
-        // Bound to a const reference, NOT a string_view: getDisplayName returns by value,
-        // so a string_view would dangle the moment the temporary died.
         const std::string& name = d->getDisplayName();
         if (name != CDE::DECO_BAR && name != CDE::DECO_LEFT && name != CDE::DECO_RIGHT && name != CDE::DECO_BOTTOM)
             continue;
@@ -162,9 +144,7 @@ CBox CCdeDecoration::outerBox() const {
     const CBox win = windowBox();
 
     switch (m_edge) {
-        // Motif's title bar spans the FULL window width, frame bands included — that is
-        // the whole point of it. Using the client width leaves wallpaper gaps in the
-        // top corners.
+        // Motif's title bar spans the FULL window width, frame bands included.
         case DECORATION_EDGE_TOP:
             // The bar's height is the positioner's answer for THIS decoration: on the top
             // edge our own box *is* the sibling the other three read.

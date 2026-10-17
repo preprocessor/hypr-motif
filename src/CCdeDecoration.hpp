@@ -30,31 +30,22 @@ class CCdeDecoration : public IHyprWindowDecoration {
 
     // Runs `fn` for every live decoration, with the window it belongs to.
     //
-    // This replaces walking every window's decoration list and dynamic_cast-ing each
-    // entry, which the three event listeners in main.cpp all used to do — on every mouse
-    // move, across every decoration on the compositor, ours and other plugins'.
-    //
-    // INVARIANT: `fn` must not destroy a decoration, because the loop indexes the
-    // registry directly. All three callers only sync state — invalidate/onWindowUpdate,
-    // syncDrag/syncHover/damageBar, endGesture — and none of those removes an object.
-    // That is also why the one place that DOES destroy a window, runButtonAction, is
-    // reached from onInputOnDeco and not from here. If a listener ever needs to close a
-    // window, copy the registry first or this will walk a freed slot.
+    // INVARIANT: `fn` must not destroy a decoration, because this indexes the registry
+    // directly. All three callers only sync state — invalidate/onWindowUpdate,
+    // syncDrag/syncHover/damageBar, endGesture. That is also why the one place that does
+    // destroy a window, runButtonAction, is reached from onInputOnDeco and not from here.
     static void forEach(const std::function<void(CCdeDecoration&, PHLWINDOW)>& fn);
 
-    // Whether `window` already carries one of ours called `name`, which is what makes
-    // onNewWindow idempotent. Deliberately scans the compositor's decoration list rather
-    // than the registry above — see the definition.
+    // Whether `window` already carries one of ours called `name`; what makes onNewWindow
+    // idempotent. Scans the compositor's list rather than the registry — see the definition.
     static bool windowHas(PHLWINDOW window, const std::string& name);
 
-    // Unregisters every decoration and asks the compositor to drop it. Called from
-    // PLUGIN_EXIT only, with the plugin's own handle.
+    // Unregisters every decoration and asks the compositor to drop it. PLUGIN_EXIT only.
     //
-    // Without this the decorations outlive the unload: addWindowDecoration hands them to
-    // Hyprland, which keeps the shared object mapped for as long as it holds one, so a
-    // freshly built copy loaded afterwards is skipped by the duplicate check in
-    // onNewWindow and the OLD code keeps drawing. That is the stale-inode trap in
-    // AGENTS.md gotcha 3, and it makes "build, load, look" silently test nothing.
+    // Without this the decorations outlive the unload: Hyprland keeps the shared object
+    // mapped for as long as it holds one, so the next `plugin load` finds the display
+    // names already present and skips its own — leaving the OLD code on screen. That is
+    // gotcha 3, and it makes "build, load, look" silently test nothing.
     static void removeAll(HANDLE handle);
 
     SDecorationPositioningInfo getPositioningInfo() override;
@@ -71,41 +62,36 @@ class CCdeDecoration : public IHyprWindowDecoration {
   public:
     // Hyprland does not damage a plugin decoration when only its CONTENTS change (a
     // title update), so the new texture's pass is culled and the old text stays. This
-    // damages the bar's region explicitly; called whenever we build a fresh texture.
-    // Public because main.cpp's window.title listener needs it — the damage has to come
-    // from outside draw(), which is not called at all when nothing is damaged.
+    // damages the bar's region explicitly. Public because the damage has to come from
+    // outside draw(), which is not called at all when nothing is damaged.
     void damageBar();
 
-    // Drops the cached raster so the next draw() rebuilds it. Public for the same
-    // reason; the event handler has no other way to invalidate the cache.
+    // Drops the cached raster so the next draw() rebuilds it.
     void invalidate() {
         m_barTex.reset();
     }
 
-    // Recomputes which button the cursor is over, from a GLOBAL position. Returns true
-    // if it changed, in which case the texture is already dropped and the caller only
-    // has to damage the bar.
-    //
-    // This has to be callable from OUTSIDE draw(): with nothing damaged, Hyprland never
-    // calls draw(), so a hover polled from inside it can never notice the cursor arriving
-    // — the same chicken-and-egg as the title update. main.cpp calls it from the mouse
-    // motion listener. Uses the cached bar box so the common "cursor is nowhere near this
-    // window" case is one rect test.
+    // Recomputes which button the cursor is over, from a GLOBAL position. Returns true if
+    // it changed, in which case the texture is already dropped and the caller only has to
+    // damage the bar. Uses the cached bar box, so the common "cursor is nowhere near this
+    // window" case costs one rect test.
     bool syncHover(const Vector2D& globalPos);
 
-    // Starts the window drag once the cursor passes DRAG_THRESHOLD from the press, and
-    // ends a drag whose release landed off the window. Called from the mouse motion
-    // listener for the same reason syncHover is: Hyprland sends decorations no
-    // INPUT_TYPE_MOTION, and a poll inside draw() would never run for a window that is
-    // sitting still — which is exactly the state a window is in while waiting to be
-    // dragged. Returns true if a drag started, so the caller can damage the bar.
+    // Starts the window drag once the cursor passes DRAG_THRESHOLD, and ends a drag whose
+    // release landed off the window. Returns true if a drag started, so the caller can
+    // damage the bar.
+    //
+    // syncHover and this have to be callable from OUTSIDE draw(): with nothing damaged
+    // Hyprland never calls draw(), so a poll inside it can never notice the cursor arriving
+    // — the same chicken-and-egg as the title update. Hyprland also sends decorations no
+    // INPUT_TYPE_MOTION at all, and a window waiting to be dragged is exactly the state
+    // where nothing is being repainted. main.cpp drives both from mouse.move.
     bool syncDrag(const Vector2D& globalPos);
 
     // Retires a gesture this decoration armed or started, whether a bar drag or a corner
-    // resize. Public because main.cpp's mouse.button listener calls it for every decoration:
-    // a release that lands off the window never reaches onInputOnDeco, and nothing else
-    // ends a gesture the plugin started — the compositor's own drag is ended by the mouse
-    // bind that owns it, and there is no bind here.
+    // resize. Public because a release that lands off the window never reaches
+    // onInputOnDeco, and nothing else ends a gesture the plugin started — the compositor's
+    // own drag is ended by the mouse bind that owns it, and there is no bind here.
     void endGesture();
 
   private:
@@ -151,11 +137,12 @@ class CCdeDecoration : public IHyprWindowDecoration {
 
     // Focused windows use a different palette, so a focus change must invalidate the
     // cached texture. Polled rather than subscribed: window.active only names the newly
-    // focused window, not the one losing focus, so an event handler would have to track
-    // and invalidate the previous one by hand. This is a pointer compare per frame.
-    // isWindowActive() takes a PHLWINDOW (shared ptr) and m_window is a PHLWINDOWREF (weak
-    // ptr), which does not implicitly convert. Comparing the raw pointers sidesteps
-    // constructing a shared pointer just to ask a yes/no question.
+    // focused window, not the one losing focus, so a handler would have to track and
+    // invalidate the previous one by hand. This is a pointer compare per frame.
+    //
+    // Not isWindowActive(): that takes a PHLWINDOW (shared) and m_window is a PHLWINDOWREF
+    // (weak), which does not implicitly convert. Comparing raw pointers avoids building a
+    // shared pointer just to ask a yes/no question.
     bool isActive() const {
         return m_window && Desktop::focusState()->window().get() == m_window.get();
     }
@@ -199,7 +186,7 @@ class CCdeDecoration : public IHyprWindowDecoration {
     // Whether the compositor is currently dragging or resizing THIS window on our behalf.
     bool               m_dragging   = false;
     // The bar's global box from the last draw(). Hover is tested against this rather than
-    // recomputing outerBox() (five positioner lookups) on every mouse-move event.
+    // recomputing outerBox() — which walks the whole decoration list — on every mouse move.
     CBox        m_cachedBar = {};
 
     void        retexture(float scale);

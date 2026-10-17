@@ -8,15 +8,12 @@
 
 namespace CDE {
 
-    // Only ever used as a `const&` parameter, so a forward declaration is enough and
-    // chrome.hpp stays free of the config header — which includes this one, and would
-    // otherwise need CDE::BAR_HEIGHT before it was defined.
+    // Forward declaration is enough — it is only ever a `const&` parameter. Including
+    // config.hpp here instead would be circular: it includes this file, and needs BAR_HEIGHT.
     struct SConfig;
 
-    // The four decorations' display names, one per edge. They are the identity of this
-    // plugin's decorations: onNewWindow dedupes on them, and windowBox() matches the
-    // sibling list against them to recover the window's outer span. Kept here so the two
-    // cannot drift apart.
+    // Display names, one per edge. These are the decorations' identity: onNewWindow dedupes
+    // on them and windowBox() matches the sibling list against them.
     inline constexpr auto DECO_BAR    = "CDE";
     inline constexpr auto DECO_LEFT   = "CDE:left";
     inline constexpr auto DECO_RIGHT  = "CDE:right";
@@ -45,17 +42,13 @@ namespace CDE {
     // "below the decorative part of the bar".
     inline constexpr int FIELD_TOP = BEVEL + 2 + GROOVE * 2;
 
-    // Where the groove's dark half starts: the bevel, then two face rows before it. Named
-    // because it is drawn directly in drawBarBackground, and BEVEL + 2 in a fill() call is
-    // exactly the kind of literal that drifts when the bevel thickness changes.
+    // Where the groove's dark half starts, drawn directly in drawBarBackground.
     inline constexpr int GROOVE_TOP = BEVEL + 2;
 
-    // One separator, one drag-rule line: the dark/light pair is always SIDE of each, so
-    // this is how wide the drawn pair comes out. Used where both halves are drawn together.
+    // A separator or drag rule is always SIDE of dark + SIDE of light.
     inline constexpr int SIDES_PAIRED = SIDE * 2;
 
-    // Config floors. bar_height below FIELD_TOP leaves no band for the fields to live in,
-    // and the drag rules need a little more than that (see drawDragRules).
+    // Config floors. bar_height below FIELD_TOP leaves no band for the fields to live in.
     inline constexpr int MIN_BAR_HEIGHT      = 16;
     inline constexpr int TITLE_FONT_SIZE     = 12;
     inline constexpr int MIN_TITLE_FONT_SIZE = 6;
@@ -78,14 +71,14 @@ namespace CDE {
     // must not read as part of the text or of the controls.
     inline constexpr int DRAG_RULE_GAP = 10;
 
-    // The drag rules are three light lines stacked in the field band, each with its dark
+    // The drag rules are four light lines stacked in the field band, each with its dark
     // shadow one pixel right and one row below.
     inline constexpr int DRAG_RULE_LINES = 4;
 
-    // Shadow offset, and the face row between one line's shadow and the next line's. The gap is
-    // fixed: it is the measured one, and growing it would spread the lines apart instead of
-    // leaving the clearance above and below them. The clearance itself is derived from the
-    // field band in drawDragRules — 3px at the reference bar.
+    // Shadow offset, and the face row between one line's shadow and the next line's. The
+    // gap is fixed: growing it would spread the lines apart instead of leaving the
+    // clearance above and below them, which drawDragRules derives from the field band
+    // (3px at the reference bar).
     inline constexpr int DRAG_RULE_SHADOW_DX = 1;
     inline constexpr int DRAG_RULE_STACK_GAP = 1;
 
@@ -121,25 +114,21 @@ namespace CDE {
     // Motif's window-menu slot is where we put close, to keep the 1-left/2-right shape.
     enum eButton : int { BTN_CLOSE = 0, BTN_FLOAT, BTN_MAX, BTN_COUNT, BTN_NONE };
 
-    // One texture holds the whole bar, title text included. Drawing the title into
-    // the same Cairo surface avoids queueing a second pass element, which the
-    // compositor culls when the opaque bar already covers that area.
+    // One texture holds the whole bar, title text included: a second pass element for the
+    // title would be culled, since the opaque bar already covers that area.
     //
-    // The palette, the button visibility and the font size all come from `cfg` rather
-    // than from config() inside: the caller already read it once, and a drawing helper
-    // that quietly re-reads global config hides where a pixel's colour came from.
+    // The palette, button visibility and font size come from `cfg` rather than from
+    // config() inside — see the code-style rule in AGENTS.md.
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, const SConfig& cfg, bool active);
 
     // The frame strip for a non-top edge. `edge` is an eDecorationEdges value; the
     // strip's own width/height is whichever axis is the border thickness.
     SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active);
 
-    // Which button a bar-local point is over, or BTN_NONE. Draws no icon and dispatches
-    // nothing; it is geometry only.
+    // Which button a bar-local point is over, or BTN_NONE.
     //
-    // The only part of the button layout CCdeDecoration.cpp needs: the drawing code and
-    // the hit-test share the rects inside chrome.cpp, so the clickable area cannot drift
-    // from the drawn one, and this hands out the answer rather than the geometry.
+    // The only part of the button layout CCdeDecoration.cpp needs: it draws from the same
+    // rects this tests against, so the clickable area cannot drift from the drawn one.
     int buttonAt(Vector2D size, const Vector2D& p, bool showButtons);
 
 } // namespace CDE

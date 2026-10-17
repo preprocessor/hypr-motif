@@ -96,18 +96,16 @@ namespace {
     //   right  (outerIsHigh=true)   light(1) face(2) dark(2)
     //   bottom (outerIsHigh=true)   light(1) face(2) dark(2)
     //
-    // The band widths are the same either way; only which end is lit differs. So this
-    // takes the band's three widths and an origin, and the two orientations below are
-    // the only things that know about x versus y. Keeping the arithmetic in one place is
-    // the point: it used to be inline in a function with a `vertical` flag, where
-    // transposing the two fill() calls by mistake produced a 1px lit COLUMN and silently
+    // The widths are the same either way, so they live here and the two orientations below
+    // only place them. That split is deliberate: with one function taking a `vertical`
+    // flag, transposing the fill() calls by mistake produced a 1px lit COLUMN and silently
     // cost the bottom frame its inner highlight.
     struct SBevelBands {
         double lit, face, dark;
     };
 
     SBevelBands bevelBandsFor(bool outerIsHigh) {
-        const double wideLit = CDE::BORDER - CDE::FACE_BAND - CDE::SIDE; // the wide band
+        const double wideLit = CDE::BORDER - CDE::FACE_BAND - CDE::SIDE;
         const double lit     = outerIsHigh ? CDE::SIDE : wideLit;
         return {lit, CDE::FACE_BAND, CDE::BORDER - CDE::FACE_BAND - lit};
     }
@@ -188,10 +186,10 @@ namespace {
             }
     }
 
-    // A rule marking off the corner grab square on a frame strip, running ALONG x at
-    // height y. The lit pixel goes on local x=0, the outer edge on the left strip and the
-    // inner one on the right, so `darkOuter` keeps the outermost pixel of the second row
-    // dark where that matters.
+    // A rule marking off the corner grab square, running ALONG x at height y. The lit
+    // pixel goes on local x=0 — the outer edge on the left strip, the inner one on the
+    // right — so `darkOuter` keeps the outermost pixel of the second row dark where that
+    // matters.
     void grabRuleAcross(cairo_t* cr, double x, double y, const SPalette& p, bool darkOuter) {
         fill(cr, x, y, 1, CDE::SIDE, p.light);
         fill(cr, x + 1, y, CDE::BORDER - 1, CDE::SIDE, p.dark);
@@ -224,10 +222,7 @@ namespace {
     }
 
     // The one texture-producing path, for both the bar and the frame strips: make a
-    // device-sized surface, hand a LOGICAL-pixel cairo context to `paint`, upload, free.
-    //
-    // The caller scales by `scale` and draws in logical pixels; the surface is
-    // `scale` times that, so nothing downstream has to think about device pixels.
+    // device-sized surface, hand `paint` a context scaled back to logical pixels, upload.
     SP<Render::ITexture> rasterise(Vector2D size, float scale, const std::function<void(cairo_t*)>& paint) {
         const int surfaceW = std::max(1, sc<int>(size.x * scale));
         const int surfaceH = std::max(1, sc<int>(size.y * scale));
@@ -250,12 +245,10 @@ namespace {
 namespace CDE {
 
     // Size of the corner grab square: bar height minus one, from both reference data
-    // points (21 at a 22px bar, 24 at 25px). Floored at MIN_CORNER_GRAB, below which the
-    // grab rules and the field separators overlap into mush. See AGENTS.md `## Corners`.
+    // points (21 at a 22px bar, 24 at 25px), floored at MIN_CORNER_GRAB.
     //
-    // Takes the bar height rather than reading config(): every caller already has it, and
-    // a geometry helper that quietly consults the config is how the same number ends up
-    // meaning two different things in one raster.
+    // Takes the bar height rather than reading config(): a geometry helper that quietly
+    // consults the config is how one number ends up meaning two things in a single raster.
     int cornerGrab(int barHeight) {
         return std::max(MIN_CORNER_GRAB, barHeight - 1);
     }
@@ -356,8 +349,7 @@ namespace CDE {
 
         // The bar's left and right ends ARE the frame's side bevels — the bar spans the
         // full window width, so these columns are shared with the side strips and must
-        // be painted by the same routine or the join shows. `false` on the left because
-        // its outer edge is the one facing away from the client.
+        // be painted by the same routine or the join shows.
         bevelBandsVertical(cr, 0, BEVEL, size.y - BEVEL, bevelBandsFor(false), p);
         bevelBandsVertical(cr, size.x - BORDER, BEVEL, size.y - BEVEL, bevelBandsFor(true), p);
 
@@ -382,22 +374,20 @@ namespace CDE {
         separator(cr, size.x - RIGHT_MARGIN, sepTop, sepH, p);
     }
 
-    // The vertical rules marking off the corner grab square. They run the full height of
-    // the square, from bar-rel 1 to the bottom edge, unlike the field separators which
-    // start below the bevel — and they land on the same columns as two of those, so
-    // drawing them separately is the only way to reach further without widening them.
-    // The groove's light row breaks them, as in the reference, hence the two spans.
+    // The vertical rules marking off the corner grab square. Unlike the field separators
+    // they run from bar-rel 1 to the bottom edge, and they land on the same columns as
+    // two of those, so drawing them separately is the only way to reach further without
+    // widening them.
+    //
+    // Two spans, with the groove's light row left as a deliberate 1px gap — the reference
+    // breaks the rule there. A window too narrow for the two rules not to collide gets
+    // neither.
     void drawCornerGrabRules(cairo_t* cr, Vector2D size, const SPalette& p, int barHeight) {
         const int grab = cornerGrab(barHeight);
 
-        // Each rule is a dark+light pair SIDES_PAIRED wide, inset `grab` from its own edge.
-        // They collide once the two spans touch, so a window narrower than that gets none.
         if (size.x <= grab * 2 + SIDES_PAIRED * 2)
             return;
 
-        // The upper span starts one row in, below the outer bevel, and ends ON the groove's
-        // dark row. The lower one picks up under the groove's light row, so the light row
-        // is a deliberate 1px gap in the rule — the reference breaks it there.
         const double upperTop = SIDE;
         const double upperEnd = GROOVE_TOP;
         const double lowerTop = FIELD_TOP;
