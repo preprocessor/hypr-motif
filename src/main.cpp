@@ -77,6 +77,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     CDE::registerConfig(handle);
+    CDE::registerRules();
 
     keepListener(Event::bus()->m_events.window.open, [](PHLWINDOW w) { onNewWindow(w); });
 
@@ -148,6 +149,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    // Hand back the rule effect names while our code is still mapped — see g_listeners for
+    // why the ordering here matters.
+    CDE::unregisterRules();
+
     // Drop the listeners while our code is still mapped — see g_listeners.
     g_listeners.clear();
 

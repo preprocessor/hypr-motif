@@ -3,6 +3,7 @@
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/desktop/rule/windowRule/WindowRuleEffectContainer.hpp>
 #include <hyprutils/memory/SharedPtr.hpp>
 
 #include <algorithm>
@@ -18,6 +19,11 @@ namespace {
     SP<Config::Values::CBoolValue>  showButtons;
     SP<Config::Values::CColorValue> face, light, dark, title, titleShadow;
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
+
+    // Ids the compositor handed back for our two rule effects. Zero is
+    // WINDOW_RULE_EFFECT_NONE, which is never a key in a window's custom-prop map, so it
+    // doubles as "no such rule" without a separate sentinel.
+    Desktop::Rule::CWindowRuleEffectContainer::storageType g_noTitlebar = 0, g_noBorder = 0;
 
     uint64_t g_generation = 0;
 
@@ -64,6 +70,27 @@ namespace CDE {
         // addConfigValueV2 takes SP<IValue>, so every derived type upcasts implicitly.
         for (const auto& value : all)
             HyprlandAPI::addConfigValueV2(h, value);
+    }
+
+    void registerRules() {
+        g_noTitlebar = Desktop::Rule::windowEffects()->registerEffect("cde:no_titlebar");
+        g_noBorder   = Desktop::Rule::windowEffects()->registerEffect("cde:no_border");
+    }
+
+    void unregisterRules() {
+        Desktop::Rule::windowEffects()->unregisterEffect(g_noTitlebar);
+        Desktop::Rule::windowEffects()->unregisterEffect(g_noBorder);
+    }
+
+    bool edgeHidden(PHLWINDOW window, uint32_t edge) {
+        if (!window || !window->m_ruleApplicator)
+            return false;
+
+        // Presence in the custom-prop map IS the match: a valueless token in windowrulev2
+        // reaches the effect as "1", so there is nothing left to parse.
+        const auto& props = window->m_ruleApplicator->m_otherProps.props;
+
+        return props.contains(edge == DECORATION_EDGE_TOP ? g_noTitlebar : g_noBorder);
     }
 
     SConfig config() {

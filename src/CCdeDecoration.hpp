@@ -99,6 +99,11 @@ class CCdeDecoration : public IHyprWindowDecoration {
         return m_edge == DECORATION_EDGE_TOP;
     }
 
+    // Whether a window rule has switched this strip off, in which case it reserves no space,
+    // draws nothing and takes no input. Checked from getPositioningInfo, draw and
+    // onInputOnDeco, so the three cannot disagree about which of them is still there.
+    bool suppressed() const;
+
     // The window's outer rect, from the boxes the compositor gave the four sibling strips.
     // This is what the corner grab squares are measured from.
     CBox windowBox() const;

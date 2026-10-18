@@ -66,6 +66,10 @@ void CCdeDecoration::removeAll(HANDLE handle) {
     reg.clear();
 }
 
+bool CCdeDecoration::suppressed() const {
+    return CDE::edgeHidden(m_window.lock(), m_edge);
+}
+
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     const auto& cfg = CDE::config();
 
@@ -74,6 +78,15 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     info.edges    = m_edge;
     info.priority = CDE::DECO_PRIORITY;
     info.reserved = true;
+
+    // A rule switched this strip off: reserve nothing, so the client grows into the space
+    // and the window is its old self minus the chrome. windowBox() already copes with a
+    // zero-extent sibling — that is the same case as one not placed yet, and the client
+    // edges it falls back to ARE the window's outer edges with nothing reserved there.
+    if (suppressed()) {
+        info.reserved = false;
+        return info;
+    }
 
     // SBoxExtents.topLeft is {left, top}; bottomRight is {right, bottom}.
     switch (m_edge) {
@@ -395,6 +408,12 @@ void CCdeDecoration::ensureTextures(float scale) {
 }
 
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data) {
+    // Nothing is left of this strip, so it has no buttons to press and no corner squares to
+    // arm a resize from. Answering here keeps that from being a question of exactly how the
+    // positioner sizes a zero-extent decoration.
+    if (suppressed())
+        return true;
+
     const auto* ev         = type == INPUT_TYPE_BUTTON ? std::any_cast<IPointer::SButtonEvent>(&data) : nullptr;
     const bool   leftDown  = ev && ev->mouse && ev->button == BTN_LEFT && windowVisible();
 
@@ -496,6 +515,16 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
 void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     if (!windowVisible())
         return;
+
+    // The strip is gone, and so is everything cached from it: m_cachedBar is what
+    // syncHover() tests the cursor against, so a stale one would keep a button lit on a bar
+    // that is no longer drawn.
+    if (suppressed()) {
+        m_cachedBar = {};
+        m_hovered   = CDE::BTN_NONE;
+        m_barTex.reset();
+        return;
+    }
 
     const float scale = monitor ? monitor->scale() : 1.f;
 

@@ -78,6 +78,34 @@ plugin {
 | `title_font_size` | int | title size in points, min 6 | `12` |
 | `show_buttons` | bool | draw the three title bar buttons | `true` |
 
+## Window rules
+
+Two rules switch parts of the chrome off, per window. A hidden part reserves no space, so
+the window closes up over it.
+
+| rule | effect |
+| --- | --- |
+| `cde:no_titlebar` | no title bar — no bar, buttons, title or drag area |
+| `cde:no_border` | no frame — nothing on the left, right or bottom edge |
+
+```ini
+windowrulev2 = cde:no_titlebar, class:^(kitty)$
+windowrulev2 = cde:no_border, class:^(foot)$
+```
+
+Under a Lua config the effect name has to be a **quoted key**, or it reads as a syntax
+error:
+
+```lua
+hl.window_rule({
+  match = { class = "^kitty$" },
+  ["cde:no_titlebar"] = true,
+})
+```
+
+Both together hide everything. Like every other setting, a rule takes effect at plugin load
+and at the next `hyprctl reload` — not from `hl.eval` alone.
+
 ## Interaction
 
 | where | what it does |

@@ -125,8 +125,8 @@ default stdenv. If you bump `flake.lock`, rebuild before touching your running s
 src/main.cpp           plugin entry: pluginAPIVersion / pluginInit / pluginExit
 src/CCdeDecoration.hpp IHyprWindowDecoration subclass — declaration, the registry
 src/CCdeDecoration.cpp positioning, draw(), input handling
-src/config.hpp         config struct, generation counter
-src/config.cpp         plugin:cde:* registration + live read
+src/config.hpp         config struct, rule effects, generation counter
+src/config.cpp         plugin:cde:* registration + live read, window rules
 src/chrome.hpp         layout constants, Cairo entry points
 src/chrome.cpp         Cairo drawing of the bevels, bar, corners and glyphs
 tools/verify-pixels.sh the pixel-neutrality driver (`## Verification`)
@@ -192,6 +192,8 @@ Verified against live pixels, not arithmetic. Renders today:
 - **All three buttons act**, verified by real clicks against a live session: close →
   `Actions::closeWindow`, float toggle → `Actions::floatWindow(TOGGLE)`,
   maximize → `Actions::fullscreenWindow(FSMODE_FULLSCREEN)`. See `## Button input`.
+- **Two window rules** switch the bar and the frame off per window — see
+  `## Window rules`.
 
 Gaps, in the order they bite:
 
@@ -585,6 +587,43 @@ Everything that measures a distance along the bar derives from this value — th
 band, the title baseline and the corner grab (`## Corners`) — so a taller bar grows all of
 them together rather than stretching the chrome.
 
+## Window rules
+
+Two rule effects, registered with `Desktop::Rule::windowEffects()->registerEffect` in
+`pluginInit` and released in `PLUGIN_EXIT`: **`cde:no_titlebar`** hides the bar,
+**`cde:no_border`** hides the frame (left, right and bottom). Both together hide everything.
+Measured live, geometry and not just pixels: `no_titlebar` moves the client from
+`y = 26` to `y = 0` and grows it by exactly `bar_height`; `no_border` moves it from `x = 5`
+to `x = 0` and widens it by exactly `2 × BORDER`.
+
+**A hidden edge reserves NOTHING — `getPositioningInfo` returns `reserved = false` with zero
+extents.** Blanking the pixels would leave a hole where the chrome used to be; the client has
+to close up over it. `draw()` and `onInputOnDeco()` test the same predicate, so a hidden
+strip also takes no clicks and leaves no corner grab squares.
+
+`windowBox()` needed no change for a zero-extent sibling. It already falls back to its own
+box when a sibling is unplaced, and with nothing reserved on that edge **the client edges it
+falls back to ARE the window's outer edges** — the same identity, arrived at by default.
+
+**No `window.updateRules` listener, deliberately.** Hyprland already repositions a window
+itself when a rule is applied to it — measured: eval'ing the rule at a live window moved its
+client immediately, no reload. An earlier revision added a listener calling
+`g_pDecorationPositioner->onWindowUpdate()` from that event, which means re-entering the
+positioner from inside rule evaluation. It was cut rather than debugged, because
+`config.reloaded` already re-lays out every window and a rule change needs a
+`hyprctl reload` anyway (see `## Bar height`).
+
+**The Lua config backend validates namespaced keys against the registered effects, so a
+plugin rule works there — as a QUOTED key.** `hl.window_rule({ ..., ["cde:no_titlebar"] = true })`
+is accepted; the bare identifier form is a syntax error, and an unregistered name is rejected
+with `unknown field`, which is a useful check that the plugin is loaded. There is no
+dot-bracket-free spelling: `cde_no_titlebar = true` is rejected as an unknown field.
+
+`unregisterEffect` blanks the name rather than erasing it, so re-registering after an
+unload takes a **fresh slot** — a slow leak, one entry per load/unload cycle, bounded by a
+uint16_t. Registering without unregistering would leak the same amount and additionally leave
+the name unusable while the plugin is gone.
+
 ## Config options
 
 All namespaced `plugin:cde:`, registered with `addConfigValueV2` in `src/config.cpp`, set
@@ -870,10 +909,11 @@ Hyprland's shadow looks wrong, leave it off.
 
 ## Roadmap
 
-1. **Rule-settable colours.** Register four effects in `pluginInit`, unregister in
-   `PLUGIN_EXIT` (hyprbars' pattern):
+1. **Rule-settable colours.** The registration plumbing already exists — `registerRules` /
+   `unregisterRules` in `src/config.cpp` — so this is four more `registerEffect` calls
+   (`cde:face`, `cde:light`, `cde:dark`, `cde:title`) and a per-window config read:
    ```cpp
-   Desktop::Rule::windowEffects()->registerEffect("cde:face");  // + light, dark, title
+   Desktop::Rule::windowEffects()->registerEffect("cde:face");
    ```
    `configFor(PHLWINDOW)` reads the global config, then overrides any colour present in
    `window->m_ruleApplicator->m_otherProps.props` — **rule wins over config, one colour at
@@ -881,8 +921,8 @@ Hyprland's shadow looks wrong, leave it off.
    ```lua
    windowrulev2 = float, title:^(kitty)$, cde:face rgb(ff00aa55)
    ```
-   Also needs `Event::bus()->m_events.window.updateRules` to invalidate that window, or a
-   rule change will not redraw until something else does. Cheap and self-contained.
+   Needs an `Event::bus()->m_events.window.updateRules` listener to invalidate that window,
+   or a rule change will not redraw until something else does. Cheap and self-contained.
 2. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
 
 ## Non-goals

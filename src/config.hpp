@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 
@@ -35,6 +36,22 @@ namespace CDE {
 
     // Registers every plugin:cde: value. Must be called from pluginInit.
     void registerConfig(HANDLE h);
+
+    // Registers the two plugin:cde: window rule effects. pluginInit and PLUGIN_EXIT only —
+    // the compositor owns the name -> id map, and unregistering blanks the name rather than
+    // erasing it, so a re-register takes a fresh slot every reload.
+    void registerRules();
+    void unregisterRules();
+
+    // Whether a window rule has switched this edge's chrome off. A hidden strip reserves no
+    // space, draws nothing and takes no input — the rule removes the chrome from the window
+    // rather than just blanking its pixels. One rule hides the bar, one the frame; both
+    // together hide everything.
+    //
+    // Read from getPositioningInfo, which the positioner only re-runs when told to — so a
+    // rule takes effect at plugin load and at every `hyprctl reload`, the same as
+    // bar_height. See AGENTS.md `## Window rules`.
+    bool edgeHidden(PHLWINDOW window, uint32_t edge);
 
     // Reads current values; safe to call per raster, it never caches.
     SConfig config();
