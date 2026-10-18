@@ -619,10 +619,85 @@ is accepted; the bare identifier form is a syntax error, and an unregistered nam
 with `unknown field`, which is a useful check that the plugin is loaded. There is no
 dot-bracket-free spelling: `cde_no_titlebar = true` is rejected as an unknown field.
 
+**A rule added with `hyprctl eval` is NOT removed by `hyprctl reload`.** Measured: after
+evaluating `cde:no_titlebar` for one class and reloading, that window still had both
+effects in `m_ruleCombinator`'s custom-prop map (`keys=[88='true' 87='true']`) and still
+rendered without chrome. Only a compositor restart clears it. This bites when testing —
+a window kept without its title bar after a reload is usually a leftover test rule, not a
+bug, and `props.size` on that window is the tell.
+
 `unregisterEffect` blanks the name rather than erasing it, so re-registering after an
 unload takes a **fresh slot** — a slow leak, one entry per load/unload cycle, bounded by a
 uint16_t. Registering without unregistering would leak the same amount and additionally leave
 the name unusable while the plugin is gone.
+
+## Reporting geometry
+
+**`hyprctl clients` reports the CLIENT rect and will always exclude our chrome.** That is not
+a plugin-shaped hole. The positioner subtracts reserved space before the IPC ever sees the
+window, for Hyprland's own decorations exactly as much as for ours — measured, by setting
+`general:border_size = 6`:
+
+```
+border_size = 0  →  helium at [5, 26]   size [1710, 1359]
+border_size = 6  →  helium at [11, 32]  size [1698, 1347]
+```
+
+**There is no hook to change it.** `SDecorationPositioningInfo` carries `desiredExtents` (how
+much to *reserve*) and `reserved`, and nothing else. `CHyprBorderDecoration` does hold a
+private `m_reportedExtents`, but it is non-virtual and inaccessible. So `hyprctl cde clients`
+is the only way to publish the outer rect:
+
+```
+$ hyprctl cde clients
+[{"address": "0x5e86c8e02a40", "at": [440, 0], "size": [2560, 1440], ...}]
+```
+
+**It is `hyprctl clients -j` with two fields rewritten, not a payload built here.**
+`HyprlandAPI::invokeHyprctlCommand("clients", "", "json")` hands back the compositor's own
+document, so every field it has is already in it and a field added upstream arrives for
+free. The patch keys on `"address"`, treats each object as the span up to the next address,
+and rewrites only the `"at"` and `"size"` inside it.
+
+Measured over the whole document, `at` and `size` are the **only** two-integer arrays and
+there is exactly one of each per object — which is what makes the two patterns enough. A
+window title cannot fake a match, because quotes inside a JSON string come back escaped: a
+title containing `\"at\": [9, 9]` does not match `"at"\s*:\s*\[`. Checked offline against a
+hand-written payload with those traps in it, plus negative coordinates, an empty array, a
+window with no computed rect, and a single object with no trailing comma.
+
+Two details that are not obvious from the code:
+
+- **The custom raw-string delimiter `R"RE(...)RE"` is load-bearing.** `R"(...)"` terminates
+  early on both patterns, because a capture group puts `)` immediately before a `"` — as in
+  `[a-fA-F]+)"`.
+- **Both matches are collected before anything is written**, then applied back to front.
+  Replacing the `at` shifts the offset of the `size` behind it, so writing as we scanned
+  would corrupt every object after the first.
+
+`getWindowMainSurfaceBox()` plus the extents `getPositioningInfo` reserves is the outer
+rect. Hand-rolled arithmetic beat both obvious alternatives, on measurement:
+
+- `getWindowBoxUnified(RESERVED_EXTENTS)` — agrees with the arithmetic on every window that
+  fits the work area, six of six measured, but it **clamps to that area**.
+- `getFullWindowBoundingBox()` — reads **47px taller**, Hyprland's shadow extent leaking into
+  a session where a plugin reserved space. `RESERVED_EXTENTS | FULL_EXTENTS` does the same
+  thing, which is how the 47 was pinned down.
+- `CWindow::windowBox()` — the outer rect the chrome is drawn against, but assembled from the
+  four sibling boxes with `own` as the fallback for any missing one, and `own` is a DIFFERENT
+  rectangle per edge (gotcha 2). Reading it from an arbitrary decoration is wrong the moment
+  one strip is hidden by a rule.
+
+**The outer rect does not move when a rule hides part of the chrome** — measured: with
+`cde:no_titlebar` on a helium, `hyprctl clients` went `[5,26] 1710x1409` → `[5,0] 1710x1435`
+while this stayed `[0,0] 1720x1440`. The client absorbs the freed space and the window does
+not resize, so the outer box is invariant and is simply the window's own box. That is also
+why a pixel check is the only thing that settles it: both readings fit the arithmetic, and
+only the screen shows that a frame is there.
+
+**`registerHyprCtlCommand` holds a `std::function` into this shared object for as long as it
+is registered**, so `PLUGIN_EXIT` must unregister it before anything else — same hazard, same
+reason, as `g_listeners`.
 
 ## Config options
 

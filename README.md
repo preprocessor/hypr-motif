@@ -106,6 +106,31 @@ hl.window_rule({
 Both together hide everything. Like every other setting, a rule takes effect at plugin load
 and at the next `hyprctl reload` — not from `hl.eval` alone.
 
+## Reporting geometry
+
+`hyprctl clients` reports the **client** rect — the title bar and frame are excluded, for
+Hyprland's own decorations as much as for this plugin's. That is not overridable from a
+plugin; no API lets one change what that command prints.
+
+`hyprctl cde clients` is this plugin's answer. It is `hyprctl clients -j` with the `at` and
+`size` of every window rewritten to the **outer** rect, chrome included. Everything else —
+every field, the field order, the window order — is the compositor's own output:
+
+```
+$ hyprctl cde clients
+[{
+    "address": "0x5e86c8e02a40",
+    "at": [440, 0],
+    "size": [2560, 1440],
+    "class": "vesktop",
+    ...
+}]
+```
+
+Output is always JSON, `-j` or not. The outer rect is the window's actual box, so it does not
+move when a window rule above hides part of the chrome — the client absorbs the space
+instead, and only `hyprctl clients` changes.
+
 ## Interaction
 
 | where | what it does |

@@ -1,6 +1,10 @@
 #define WLR_USE_UNSTABLE
 
+#include <format>
+#include <regex>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -55,6 +59,119 @@ static void onNewWindow(PHLWINDOW window) {
 // mapped is the only moment the handlers can safely be destroyed.
 static std::vector<Hyprutils::Signal::CHyprSignalListener> g_listeners;
 
+// Same hazard, one instance: the registered hyprctl command holds a std::function pointing
+// into this shared object, and Hyprland keeps calling it for as long as it is registered.
+static SP<SHyprCtlCommand> g_hyprCtlCommand;
+
+// The window's outer rect: the client box grown by the chrome actually reserved on it.
+//
+// NOT getWindowBoxUnified(RESERVED_EXTENTS), which looks like the obvious call and is not.
+// It agrees with this on every window that fits the work area — measured, six of six — but it
+// CLAMPS to that area, so a window overhanging it is under-reported. One live example: a
+// Steam window whose real box is [435,-26] 2570x1471 came back as [440,0] 2560x1440, while
+// the bottom frame was plainly on screen. Pixels are what settled it.
+//
+// NOT getFullWindowBoundingBox() either, which reads ~47px taller — Hyprland's shadow extent
+// leaking into a session where a plugin reserved space.
+//
+// The extents are the ones getPositioningInfo reserves, so this cannot drift from the screen:
+// a strip a rule hid reserves nothing and contributes nothing here either.
+static CBox outerBoxOf(PHLWINDOW window) {
+    const CBox   client = window->getWindowMainSurfaceBox();
+    const double top    = CDE::edgeHidden(window, DECORATION_EDGE_TOP) ? 0 : CDE::config().barHeight;
+    const double side   = CDE::edgeHidden(window, DECORATION_EDGE_LEFT) ? 0 : CDE::BORDER;
+
+    return {client.x - side, client.y - top, client.w + side * 2, client.h + top + side};
+}
+
+// The two JSON shapes the patch below matches on. `at` and `size` are the ONLY
+// two-integer arrays in the payload — measured over the whole document — and there is
+// exactly one of each per object. A window title cannot fake a match: quotes inside a JSON
+// string come back escaped, so a literal `"at": [` cannot appear in one.
+// The custom delimiter is not decoration: R"(...)" would end early, because the capture
+// groups put a `)` immediately before a `"` — as in `[a-fA-F]+)"`.
+static const std::regex ADDRESS_FIELD(R"RE("address"\s*:\s*"(0x[0-9a-fA-F]+)")RE");
+static const std::regex RECT_FIELD(R"RE("([a-z]+)"\s*:\s*\[\s*-?\d+\s*,\s*-?\d+\s*\])RE");
+
+// Rewrites the at and size inside one object's span. Both matches are collected before
+// anything is written, because replacing one shifts the other's offset — so the writes go
+// in back to front.
+static void patchRect(std::string& json, size_t from, size_t to, const CBox& box) {
+    struct SPatch {
+        size_t      at;
+        size_t      len;
+        std::string text;
+    };
+
+    std::vector<SPatch> patches;
+
+    for (std::smatch field; std::regex_search(json.cbegin() + from, json.cbegin() + to, field, RECT_FIELD);) {
+        const size_t at = from + static_cast<size_t>(field.position());
+        from            = at + field.length();
+
+        const std::string key  = field[1].str();
+        const bool        isAt = key == "at";
+
+        if (key != "at" && key != "size")
+            continue;
+
+        patches.push_back({at, static_cast<size_t>(field.length()),
+                           std::format(R"("{}": [{}, {}])", key, isAt ? static_cast<int>(box.x) : static_cast<int>(box.w),
+                                      isAt ? static_cast<int>(box.y) : static_cast<int>(box.h))});
+    }
+
+    for (auto patch = patches.rbegin(); patch != patches.rend(); ++patch)
+        json.replace(patch->at, patch->len, patch->text);
+}
+
+// `hyprctl cde clients` — `hyprctl clients -j` with at and size rewritten to the outer
+// rect, chrome included. The payload is the compositor's own rather than one built here, so
+// every field it has is already in it and a field added upstream arrives for free.
+//
+// Why it cannot just be hyprctl clients: the positioner subtracts reserved space before the
+// IPC ever sees the window, for Hyprland's own decorations as much as for ours (measured —
+// border_size = 6 moved hyprctl clients from [5,26] to [11,32] and shrank it by 12).
+// IHyprWindowDecoration has no reported-extents hook, so a plugin cannot widen what
+// `hyprctl clients` prints; this command is the only way to publish the outer rect.
+//
+// The format argument is ignored and the output is always JSON — patching the text form
+// would be string surgery with no field names to anchor on.
+static std::string cdeClients(eHyprCtlOutputFormat, std::string) {
+    std::string json = HyprlandAPI::invokeHyprctlCommand("clients", "", "json");
+
+    // Loud, not silent: if the format argument is not what this Hyprland wants, returning
+    // the untouched client rects would look like a working answer that is quietly wrong.
+    if (json.find(R"("address")") == std::string::npos)
+        return R"(hyprctl cde clients: the compositor returned no JSON for `clients`.)";
+
+    std::unordered_map<std::string, CBox> rects;
+    for (auto& window : Desktop::windowState()->windows()) {
+        if (!window || !validMapped(window))
+            continue;
+
+        rects[std::format("0x{:x}", reinterpret_cast<uint64_t>(window.get()))] = outerBoxOf(window);
+    }
+
+    // Object by object: each begins at an "address" and runs up to the next one, so a
+    // number is only ever rewritten inside its own object.
+    size_t cursor = 0;
+
+    for (std::smatch address; std::regex_search(json.cbegin() + cursor, json.cend(), address, ADDRESS_FIELD);) {
+        const size_t objectStart = cursor + static_cast<size_t>(address.position());
+        cursor                   = objectStart + address.length();
+
+        size_t objectEnd = json.size();
+        if (std::smatch next; std::regex_search(json.cbegin() + cursor, json.cend(), next, ADDRESS_FIELD))
+            objectEnd = cursor + static_cast<size_t>(next.position());
+
+        const auto rect = rects.find(address[1].str());
+        if (rect != rects.end())
+            patchRect(json, objectStart, objectEnd, rect->second);
+    }
+
+    return json;
+}
+
 // Not named `listen`: that is POSIX ::listen, and this would be an overload of it the
 // moment <sys/socket.h> arrives transitively.
 template <typename Signal, typename Fn>
@@ -78,6 +195,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     CDE::registerConfig(handle);
     CDE::registerRules();
+
+    // Prefix-matched, so `hyprctl cde clients` arrives here with its subcommand as the
+    // argument. `exact` = true would demand the whole request equal the name.
+    g_hyprCtlCommand = HyprlandAPI::registerHyprCtlCommand(PHANDLE, {.name = "cde", .exact = false, .fn = cdeClients});
 
     keepListener(Event::bus()->m_events.window.open, [](PHLWINDOW w) { onNewWindow(w); });
 
@@ -149,6 +270,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    // Before anything else, for the same reason as g_listeners below: the handler is a
+    // std::function into this shared object and Hyprland keeps calling it while registered.
+    if (g_hyprCtlCommand) {
+        HyprlandAPI::unregisterHyprCtlCommand(PHANDLE, g_hyprCtlCommand);
+        g_hyprCtlCommand.reset();
+    }
+
     // Hand back the rule effect names while our code is still mapped — see g_listeners for
     // why the ordering here matters.
     CDE::unregisterRules();
