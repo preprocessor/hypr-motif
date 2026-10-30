@@ -76,16 +76,28 @@ plugin {
 
 **Every rule is a config key.** Rule `cde:X` overrides option `plugin:cde:X` on the
 windows it matches; a window without the rule inherits the option, and a rule that sets one
-key leaves the others alone. The nine colours and the three `show_*` flags all have one, and
-there are no other rule names.
+key leaves the others alone. There are twelve, one per option that can vary per window, and
+no other rule names.
 
-| rule | effect |
-| --- | --- |
-| `cde:color_face` … `cde:color_title_shadow` | that colour, for this window |
-| `cde:color_face_active` … `cde:color_title_active` | that colour while the window is focused |
-| `cde:show_titlebar` | draw (or hide) the bar |
-| `cde:show_border` | draw (or hide) the left, right and bottom frame |
-| `cde:show_title` | draw (or hide) the title text |
+| rule | option (default) | what it changes on matching windows |
+| --- | --- | --- |
+| `cde:color_face` | `color_face` (`#999999`) | bar face while the window is **unfocused** |
+| `cde:color_light` | `color_light` (`#d1d1d1`) | bevel highlight while unfocused |
+| `cde:color_dark` | `color_dark` (`#4e4e4e`) | bevel shadow while unfocused |
+| `cde:color_title` | `color_title` (`#b0b0b0`) | title text while unfocused |
+| `cde:color_face_active` | `color_face_active` (`#eda870`) | bar face while the window is **focused** |
+| `cde:color_light_active` | `color_light_active` (`#f7d9c0`) | bevel highlight while focused |
+| `cde:color_dark_active` | `color_dark_active` (`#7d593b`) | bevel shadow while focused |
+| `cde:color_title_active` | `color_title_active` (`#ffffff`) | title text while focused |
+| `cde:color_title_shadow` | `color_title_shadow` (`#000000`) | the title's hard 1px drop shadow, focused or not |
+| `cde:show_titlebar` | `show_titlebar` (`true`) | `false` hides the bar, its buttons and drag area; a 5px frame band stays |
+| `cde:show_border` | `show_border` (`true`) | `false` hides the left, right and bottom frame |
+| `cde:show_title` | `show_title` (`true`) | `false` hides only the title text; fields, buttons and drag rules stay |
+
+The colours reach everything the option reaches: the bar face and bevel, the three buttons
+and their hover, the field separators, the corner grab rules and the title. `color_title_shadow`
+is one value for both focus states, so it is the only colour rule that does not come in an
+`_active` pair.
 
 Colours take the same syntax as the config file — `#rrggbb`, `rgb(rrggbb)`,
 `rgba(rrggbbaa)` — and a value that cannot be parsed is ignored, leaving the configured
