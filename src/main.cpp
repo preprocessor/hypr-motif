@@ -80,7 +80,7 @@ static CBox outerBoxOf(PHLWINDOW window) {
     const CBox   client   = window->getWindowMainSurfaceBox();
     const bool   noBar    = CDE::edgeHidden(window, DECORATION_EDGE_TOP);
     const bool   noFrame  = CDE::edgeHidden(window, DECORATION_EDGE_LEFT);
-    // The top band is the bar, or the frame's own BORDER once `cde:no_titlebar` hides the
+    // The top band is the bar, or the frame's own BORDER once `show_titlebar = false` hides the
     // bar. Both rules hide the band entirely.
     const double top      = noBar ? (noFrame ? 0 : CDE::BORDER) : CDE::configFor(window).barHeight;
     const double side     = noFrame ? 0 : CDE::BORDER;
@@ -219,9 +219,21 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         CCdeDecoration::forEach([](CCdeDecoration& decoration, PHLWINDOW window) {
             decoration.invalidate();
             g_pDecorationPositioner->onWindowUpdate(window);
-            // A reload that changes only pixels (a theme colour, `cde:no_title`) produces
+            // A reload that changes only pixels (a theme colour, `show_title`) produces
             // no geometry change, so the positioner's fast path does nothing and nothing
             // would repaint the dropped texture. Damage is what makes the new raster land.
+            decoration.damageBar();
+        });
+    });
+
+    // A rule change alters this window's palette and possibly which parts of the chrome
+    // exist. Geometry is Task 3; here it is pixels only.
+    keepListener(Event::bus()->m_events.window.updateRules, [](PHLWINDOW window) {
+        CCdeDecoration::forEach([&](CCdeDecoration& decoration, PHLWINDOW owner) {
+            if (owner != window)
+                return;
+
+            decoration.invalidate();
             decoration.damageBar();
         });
     });

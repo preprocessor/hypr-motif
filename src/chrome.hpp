@@ -132,7 +132,7 @@ namespace CDE {
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, const SConfig& cfg, bool active);
 
     // The frame strip for one edge: left, right, bottom, or the top band that replaces the
-    // bar when `cde:no_titlebar` hides it. `barVisible` tells the side strips whether their
+    // bar when `show_titlebar = false` hides it. `barVisible` tells the side strips whether
     // top grab marker still has a bar to sit on.
     SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active, bool barVisible);
 

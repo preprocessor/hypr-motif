@@ -11,6 +11,13 @@ namespace CDE {
     struct SConfig {
         int        barHeight      = CDE::BAR_HEIGHT;
         bool       showButtons    = true;
+
+        // Whether each part of the chrome is drawn. Frame, bar and title text; the bar and
+        // frame reserve space when shown and reserve nothing when hidden.
+        bool        showTitlebar  = true;
+        bool        showBorder    = true;
+        bool        showTitle     = true;
+
         int        titleFontSize  = CDE::TITLE_FONT_SIZE;
 
         // Font family for the title, resolved by fontconfig through cairo's toy API. The
@@ -42,25 +49,28 @@ namespace CDE {
     // Registers every plugin:cde: value. Must be called from pluginInit.
     void registerConfig(HANDLE h);
 
-    // Registers the two plugin:cde: window rule effects. pluginInit and PLUGIN_EXIT only —
-    // the compositor owns the name -> id map, and unregistering blanks the name rather than
-    // erasing it, so a re-register takes a fresh slot every reload.
+    // Registers the twelve plugin:cde: window-rule effects, one per config key — the nine
+    // colours and the three show_* flags. pluginInit and PLUGIN_EXIT only — the compositor
+    // owns the name -> id map, and unregistering blanks the name rather than erasing it, so
+    // a re-register takes a fresh slot every reload.
     void registerRules();
     void unregisterRules();
 
-    // Whether a window rule has switched this edge's chrome off. A hidden strip reserves no
-    // space, draws nothing and takes no input — the rule removes the chrome from the window
-    // rather than just blanking its pixels. One rule hides the bar, one the frame; both
-    // together hide everything.
+    // Whether chrome is switched off for this window, from `plugin:cde:show_titlebar` /
+    // `show_border` and the same-named rules. A hidden strip reserves no space, draws
+    // nothing and takes no input — the rule removes the chrome from the window rather than
+    // just blanking its pixels. One flag hides the bar, one the frame; both together hide
+    // everything.
     //
     // Read from getPositioningInfo, which the positioner only re-runs when told to — so a
-    // rule takes effect at plugin load and at every `hyprctl reload`, the same as
-    // bar_height. See AGENTS.md `## Window rules`.
+    // change takes effect at plugin load, at every `hyprctl reload`, and from a live rule
+    // change through main.cpp's window.updateRules listener. See AGENTS.md
+    // `## Window rules`.
     bool edgeHidden(PHLWINDOW window, uint32_t edge);
 
-    // Whether `cde:no_title` hides the title text on this window. The bar, its fields and
-    // the drag rules stay; the free space is used by grabber bars that run the full title
-    // field. Painting is the only thing this changes — no geometry moves.
+    // Whether `show_title = false` hides the title text on this window. The bar, its fields
+    // and the drag rules stay; the free space is used by grabber bars that run the full
+    // title field. Painting is the only thing this changes — no geometry moves.
     bool titleHidden(PHLWINDOW window);
 
     // The palette for one window: current config values plus any window-rule overrides.

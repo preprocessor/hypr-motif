@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <hyprland/src/config/shared/parserUtils/ParserUtils.hpp>
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
@@ -8,6 +9,9 @@
 #include <hyprutils/memory/SharedPtr.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <optional>
+#include <string>
 #include <vector>
 
 using namespace Hyprutils::Memory;
@@ -17,15 +21,107 @@ namespace {
     // registerConfig runs before a single decoration exists, so config() is never reached
     // with these unset — which is why it reads them without null-checking any of them.
     SP<Config::Values::CIntValue>   barHeight, titleFontSize;
-    SP<Config::Values::CBoolValue>  showButtons;
+    SP<Config::Values::CBoolValue>  showButtons, showTitlebar, showBorder, showTitle;
     SP<Config::Values::CStringValue> titleFont;
     SP<Config::Values::CColorValue> face, light, dark, title, titleShadow;
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
 
-    // Ids the compositor handed back for our rule effects. Zero is
-    // WINDOW_RULE_EFFECT_NONE, which is never a key in a window's custom-prop map, so it
-    // doubles as "no such rule" without a separate sentinel.
-    Desktop::Rule::CWindowRuleEffectContainer::storageType g_noTitlebar = 0, g_noBorder = 0, g_noTitle = 0;
+    // One rule per config key, in the order the table in AGENTS.md lists them, so the two
+    // cannot drift apart unnoticed. Zero is WINDOW_RULE_EFFECT_NONE, which is never a key in
+    // a window's custom-prop map, so it doubles as "no such rule" without a sentinel.
+    enum eRuleSlot : size_t {
+        RULE_COLOR_FACE,
+        RULE_COLOR_LIGHT,
+        RULE_COLOR_DARK,
+        RULE_COLOR_TITLE,
+        RULE_COLOR_TITLE_SHADOW,
+        RULE_COLOR_FACE_ACTIVE,
+        RULE_COLOR_LIGHT_ACTIVE,
+        RULE_COLOR_DARK_ACTIVE,
+        RULE_COLOR_TITLE_ACTIVE,
+        RULE_SHOW_TITLEBAR,
+        RULE_SHOW_BORDER,
+        RULE_SHOW_TITLE,
+        RULE_COUNT
+    };
+
+    constexpr const char* RULE_NAMES[RULE_COUNT] = {
+        "cde:color_face",         "cde:color_light",        "cde:color_dark",         "cde:color_title",
+        "cde:color_title_shadow", "cde:color_face_active",  "cde:color_light_active", "cde:color_dark_active",
+        "cde:color_title_active", "cde:show_titlebar",      "cde:show_border",        "cde:show_title",
+    };
+
+    Desktop::Rule::CWindowRuleEffectContainer::storageType g_rules[RULE_COUNT] = {};
+
+    // The rule's value as the compositor stored it, or nothing when the window did not match
+    // that rule. A valueless token arrives as "1", which is why a bool rule reads as true.
+    std::optional<std::string> ruleEffect(PHLWINDOW window, size_t slot) {
+        if (!window || !window->m_ruleApplicator || g_rules[slot] == 0)
+            return std::nullopt;
+
+        const auto& props = window->m_ruleApplicator->m_otherProps.props;
+        const auto  prop  = props.find(g_rules[slot]);
+        if (prop == props.end() || !prop->second)
+            return std::nullopt;
+
+        return prop->second->effect;
+    }
+
+    // The same parser the config file uses, so there is one colour syntax, not two. Bad
+    // input is not an error: this runs inside a raster, so it falls back to the configured
+    // colour rather than throwing or notifying.
+    std::optional<CHyprColor> parseColour(const std::string& value) {
+        if (value.empty())
+            return std::nullopt;
+
+        const auto parsed = Config::ParserUtils::parseColor(value);
+        if (!parsed.has_value())
+            return std::nullopt;
+
+        return CHyprColor(static_cast<uint64_t>(*parsed));
+    }
+
+    bool parseBool(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return !(value == "0" || value == "false" || value == "no" || value == "off");
+    }
+
+    void applyColour(PHLWINDOW window, size_t slot, CHyprColor& field) {
+        const auto effect = ruleEffect(window, slot);
+        if (!effect)
+            return;
+
+        if (const auto colour = parseColour(*effect))
+            field = *colour;
+    }
+
+    void applyBool(PHLWINDOW window, size_t slot, bool& flag) {
+        const auto effect = ruleEffect(window, slot);
+        if (!effect)
+            return;
+
+        flag = parseBool(*effect);
+    }
+
+    struct SChromeFlags {
+        bool titlebar = true;
+        bool border   = true;
+        bool title    = true;
+    };
+
+    // The configured flags with the matching rules layered on top, one flag at a time.
+    SChromeFlags chromeFlags(PHLWINDOW window) {
+        SChromeFlags flags;
+        flags.titlebar = showTitlebar->value();
+        flags.border   = showBorder->value();
+        flags.title    = showTitle->value();
+
+        applyBool(window, RULE_SHOW_TITLEBAR, flags.titlebar);
+        applyBool(window, RULE_SHOW_BORDER, flags.border);
+        applyBool(window, RULE_SHOW_TITLE, flags.title);
+
+        return flags;
+    }
 
     uint64_t g_generation = 0;
 
@@ -36,6 +132,9 @@ namespace {
         return {
             .barHeight    = std::max(CDE::MIN_BAR_HEIGHT, static_cast<int>(barHeight->value())),
             .showButtons  = showButtons->value(),
+            .showTitlebar = showTitlebar->value(),
+            .showBorder   = showBorder->value(),
+            .showTitle    = showTitle->value(),
             .titleFontSize = std::max(CDE::MIN_TITLE_FONT_SIZE, static_cast<int>(titleFontSize->value())),
             .titleFont    = titleFont->value(),
             .face         = CHyprColor(face->value()),
@@ -61,6 +160,9 @@ namespace CDE {
         titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", CDE::TITLE_FONT_SIZE);
         titleFont     = makeShared<Config::Values::CStringValue>("plugin:cde:title_font", "Title text font family (fontconfig name)", CDE::TITLE_FONT);
         showButtons  = makeShared<Config::Values::CBoolValue>("plugin:cde:show_buttons", "Whether to draw the title bar buttons", true);
+        showTitlebar = makeShared<Config::Values::CBoolValue>("plugin:cde:show_titlebar", "Draw the title bar", true);
+        showBorder   = makeShared<Config::Values::CBoolValue>("plugin:cde:show_border", "Draw the left, right and bottom frame", true);
+        showTitle    = makeShared<Config::Values::CBoolValue>("plugin:cde:show_title", "Draw the title text", true);
         face         = makeShared<Config::Values::CColorValue>("plugin:cde:color_face", "Title bar face colour", 0xff999999);
         light        = makeShared<Config::Values::CColorValue>("plugin:cde:color_light", "Bevel highlight colour", 0xffd1d1d1);
         dark         = makeShared<Config::Values::CColorValue>("plugin:cde:color_dark", "Bevel shadow colour", 0xff4e4e4e);
@@ -81,6 +183,9 @@ namespace CDE {
             titleFontSize,
             titleFont,
             showButtons,
+            showTitlebar,
+            showBorder,
+            showTitle,
             face,
             light,
             dark,
@@ -98,40 +203,40 @@ namespace CDE {
     }
 
     void registerRules() {
-        g_noTitlebar = Desktop::Rule::windowEffects()->registerEffect("cde:no_titlebar");
-        g_noBorder   = Desktop::Rule::windowEffects()->registerEffect("cde:no_border");
-        g_noTitle    = Desktop::Rule::windowEffects()->registerEffect("cde:no_title");
+        for (size_t slot = 0; slot < RULE_COUNT; ++slot)
+            g_rules[slot] = Desktop::Rule::windowEffects()->registerEffect(RULE_NAMES[slot]);
     }
 
     void unregisterRules() {
-        Desktop::Rule::windowEffects()->unregisterEffect(g_noTitlebar);
-        Desktop::Rule::windowEffects()->unregisterEffect(g_noBorder);
-        Desktop::Rule::windowEffects()->unregisterEffect(g_noTitle);
+        for (const auto id : g_rules)
+            Desktop::Rule::windowEffects()->unregisterEffect(id);
     }
 
     bool edgeHidden(PHLWINDOW window, uint32_t edge) {
-        if (!window || !window->m_ruleApplicator)
-            return false;
-
-        // Presence in the custom-prop map IS the match: a valueless token in windowrulev2
-        // reaches the effect as "1", so there is nothing left to parse.
-        const auto& props = window->m_ruleApplicator->m_otherProps.props;
-
-        return props.contains(edge == DECORATION_EDGE_TOP ? g_noTitlebar : g_noBorder);
+        const SChromeFlags flags = chromeFlags(window);
+        return edge == DECORATION_EDGE_TOP ? !flags.titlebar : !flags.border;
     }
 
     bool titleHidden(PHLWINDOW window) {
-        if (!window || !window->m_ruleApplicator)
-            return false;
-
-        return window->m_ruleApplicator->m_otherProps.props.contains(g_noTitle);
+        return !chromeFlags(window).title;
     }
 
     SConfig configFor(PHLWINDOW window) {
-        // Window-rule overrides land here in the next task; the window is taken now so every
-        // caller is already shaped correctly and the painters never see a global palette.
-        (void)window;
-        return globalConfig();
+        SConfig cfg = globalConfig();
+
+        // Rule wins over config, one key at a time: a rule that sets only `color_face`
+        // leaves the focused palette alone, which is the documented 1:1 semantics.
+        applyColour(window, RULE_COLOR_FACE, cfg.face);
+        applyColour(window, RULE_COLOR_LIGHT, cfg.light);
+        applyColour(window, RULE_COLOR_DARK, cfg.dark);
+        applyColour(window, RULE_COLOR_TITLE, cfg.title);
+        applyColour(window, RULE_COLOR_TITLE_SHADOW, cfg.titleShadow);
+        applyColour(window, RULE_COLOR_FACE_ACTIVE, cfg.faceActive);
+        applyColour(window, RULE_COLOR_LIGHT_ACTIVE, cfg.lightActive);
+        applyColour(window, RULE_COLOR_DARK_ACTIVE, cfg.darkActive);
+        applyColour(window, RULE_COLOR_TITLE_ACTIVE, cfg.titleActive);
+
+        return cfg;
     }
 
     void bumpGeneration() {

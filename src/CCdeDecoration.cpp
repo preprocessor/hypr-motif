@@ -70,8 +70,8 @@ bool CCdeDecoration::suppressed() const {
     const PHLWINDOW self = m_window.lock();
 
     // The top edge has two things to draw — the bar, and the top frame band behind it when
-    // `cde:no_titlebar` hides the bar — so it only disappears when BOTH rules hide them.
-    // Every other edge is the frame alone, which `cde:no_border` switches off.
+    // `show_titlebar = false` hides the bar — so it only disappears when BOTH flags hide
+    // them. Every other edge is the frame alone, which `show_border = false` switches off.
     if (isTop())
         return CDE::edgeHidden(self, DECORATION_EDGE_TOP) && CDE::edgeHidden(self, DECORATION_EDGE_LEFT);
 
@@ -99,7 +99,7 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     // SBoxExtents.topLeft is {left, top}; bottomRight is {right, bottom}.
     switch (m_edge) {
         case DECORATION_EDGE_TOP:
-            // The bar, or just the frame band when `cde:no_titlebar` hides the bar. The band
+            // The bar, or just the frame band when `show_titlebar = false` hides the bar. The band
             // is BORDER thick so the frame reads the same on all four sides.
             info.desiredExtents = {{0, CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP) ? CDE::BORDER : cfg.barHeight}, {0, 0}};
             break;
@@ -195,7 +195,7 @@ Layout::eRectCorner CCdeDecoration::cornerAt(const Vector2D& globalPos) const {
         return Layout::CORNER_NONE;
 
     // The grab square belongs to the bottom strip, which also draws its marker. With
-    // `cde:no_border` that strip is hidden, so there is nothing to grab — and without this
+    // `show_border = false` that strip is hidden, so there is nothing to grab — without it,
     // the windowBox() fallback for the top decoration (whose `own` box is the BAR, not the
     // window) would put both rects inside the bar, where they steal button clicks.
     if (CDE::edgeHidden(self, DECORATION_EDGE_BOTTOM))
@@ -291,7 +291,7 @@ void CCdeDecoration::retexture(float scale) {
 
     const bool barVisible = !CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP);
 
-    // `cde:no_title` hides the text but keeps the bar and its fields; an empty title makes
+    // `show_title = false` hides the text but keeps the bar and its fields; an empty title
     // the drag rules span the whole title field, which is then all drag area.
     const std::string title = CDE::titleHidden(m_window.lock()) ? std::string{} : m_window->m_title;
 
@@ -478,7 +478,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     }
 
     // Only the bar has buttons. The frame edges are pass-through, and so is a top edge
-    // whose bar is hidden (`cde:no_titlebar`) — that one is just the top frame band, not a
+    // whose bar is hidden (`show_titlebar = false`) — that one is just the top frame band,
     // drag handle. `false` here means "not handled": returning true would be read by
     // checkInputOnDecos() as CONSUMED, swallowing a drag dropped over the frame and
     // cancelling a `movewindow` bind started there.
