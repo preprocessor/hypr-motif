@@ -57,12 +57,16 @@ while "just renaming a constant". See `## Verification`.
 ## Commands
 
 ```sh
-nix develop                                          # gcc 14.4, cmake 4.4.3, hyprland 0.56.2 headers
-cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
-cp build/libcde.so build/libcde-next.so              # fresh path — see gotcha 3
-hyprctl plugin unload ~/.local/share/hyprland/plugins/libcde-old.so
-hyprctl plugin load ~/.local/share/hyprland/plugins/libcde-next.so
+nix develop                                          # gcc 14.4, cmake 4.4.3
+# The devshell's hyprland tracks HEAD (0.57 today) while the compositor runs 0.56.2, so
+# point pkg-config at the nixpkgs 0.56.2 headers or load refuses the ABI:
+nix develop -c env PKG_CONFIG_PATH=<hyprland-0.56.2-dev>/share/pkgconfig:$PKG_CONFIG_PATH \
+  sh -c 'cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build'
+cp build/libcde.so /tmp/opencode/libcde-next.so      # fresh path — see gotcha 3
+hyprctl plugin unload <the path that is loaded>
+hyprctl plugin load /tmp/opencode/libcde-next.so
 hyprctl plugin list | grep -c "Plugin cde"            # must be 1
+hyprctl getoption plugin:cde:color_face               # must answer, or the copy is a zombie
 nix build .#default                                 # packaging, needs a tracked tree
 ```
 
@@ -129,10 +133,13 @@ src/config.hpp         config struct, rule effects, generation counter
 src/config.cpp         plugin:cde:* registration + live read, window rules
 src/chrome.hpp         layout constants, Cairo entry points
 src/chrome.cpp         Cairo drawing of the bevels, bar, corners and glyphs
-tools/verify-pixels.sh the pixel-neutrality driver (`## Verification`)
-tools/capture-bars.sh bar-row screenshots; tools/set-bar-height.sh bar_height driver
 README.md              user-facing config docs
 ```
+
+**There is no `tools/` or `examples/` directory in this tree**, whatever `## Verification`
+and `## References` below say — those sections describe the harness and the reference
+captures that produced the measurements, and the files themselves are not checked in.
+Verify with `grim` + `magick` directly.
 
 **Build wiring — do not hand-roll include directories.** `hyprland.pc` already exists and
 pulls cairo transitively, so CMake needs exactly:
@@ -193,8 +200,9 @@ Verified against live pixels, not arithmetic. Renders today:
 - **All three buttons act**, verified by real clicks against a live session: close →
   `Actions::closeWindow`, float toggle → `Actions::floatWindow(TOGGLE)`,
   maximize → `Actions::fullscreenWindow(FSMODE_FULLSCREEN)`. See `## Button input`.
-- **Three window rules** switch the bar, the title text and the frame off per window — see
-  `## Window rules`.
+- **Twelve window rules, one per config key** — nine colours plus `show_titlebar`,
+  `show_border` and `show_title` — switch colour or chrome per window, and a rule applies
+  live. See `## Window rules`.
 
 Gaps, in the order they bite:
 
@@ -212,7 +220,14 @@ whole specification is the pixel comparisons in `examples/`. So "verified" means
 of every visible window, at two or three `bar_height` values, byte-identical before and
 after**.
 
-The working harness is `tools/verify-pixels.sh`, wrapping `tools/capture-bars.sh` and
+**The `tools/` scripts this section names are not in this tree** — no `verify-pixels.sh`,
+`capture-bars.sh` or `set-bar-height.sh`, and no `examples/` directory either. The capture
+below is the inline equivalent that was used to verify the per-window rules: `grim`, then
+`magick -crop` the bar rows of the focused window, then `magick compare -metric AE` the two.
+`hyprctl activewindow -j` gives the client rect; the bar is the `bar_height` rows above
+`at[1]`.
+
+The working harness was `tools/verify-pixels.sh`, wrapping `tools/capture-bars.sh` and
 `tools/set-bar-height.sh`. What the capture does, and why each part matters:
 
 - **Crops only the bar rows, never a full screenshot.** `hyprctl clients` `at` is the
@@ -589,26 +604,43 @@ them together rather than stretching the chrome.
 
 ## Window rules
 
-Three rule effects, registered with `Desktop::Rule::windowEffects()->registerEffect` in
-`pluginInit` and released in `PLUGIN_EXIT`: **`cde:no_titlebar`** hides the bar,
-**`cde:no_border`** hides the frame (left, right and bottom), and **`cde:no_title`** hides
-only the title text. The first two reserve space; the third changes pixels only — the bar,
-fields, buttons and drag rules stay.
+**Every rule is a config key.** `registerRules` registers twelve effects, one per option, and
+`PLUGIN_EXIT` releases all twelve: the nine `cde:color_*` and **`cde:show_titlebar`**,
+**`cde:show_border`**, **`cde:show_title`**. There are no other rule names — a rule that
+could not be named after an option was removed in favour of one that could, which is why
+`cde:no_titlebar` / `cde:no_border` / `cde:no_title` no longer exist.
 
-**`no_title` hands the whole title field to the drag rules.** `retexture` passes an empty
-title to `renderBar`, and `drawDragRules` treats an empty ink box as "nothing to flank":
+`configFor(window)` is the whole mechanism: `globalConfig()`, then `applyColour` for each of
+the nine colours and `applyBool` for each flag, in the rule's own order. Rule wins over
+config **one key at a time**, so `cde:color_face` alone leaves the focused palette at the
+configured `_active` colours. `edgeHidden` / `titleHidden` read the same resolution through
+`chromeFlags`, which does not parse colours — they sit on the input and positioning paths.
+
+**Colour values go through `Config::ParserUtils::parseColor`**, the parser the config file
+uses, so `#rrggbb`, `rgb(rrggbb)` and `rgba(rrggbbaa)` all work and there is one syntax, not
+two. A value it rejects leaves the config colour in place: `parseColour` returns
+`std::nullopt` and `applyColour` does not touch the field. It cannot throw or notify — this
+runs inside a raster.
+
+**Bool values**: `parseBool` lowercases and reads `0`, `false`, `no`, `off` as false,
+everything else true. A valueless token arrives from the compositor as `"1"`, so
+`["cde:show_titlebar"] = false` and `= 0` both hide the bar, and `= true` brings it back.
+
+**`show_title = false` hands the whole title field to the drag rules.** `retexture` passes an
+empty title to `renderBar`, and `drawDragRules` treats an empty ink box as "nothing to flank":
 one group of lines spans `leftFieldEnd + DRAG_RULE_GAP` to `rightFieldStart −
 DRAG_RULE_GAP` instead of splitting around the text. An empty title string does the same,
-so there is one code path for both. A rule change needs `config.reloaded` like the others —
-the generation bump is what drops the cached texture.
+so there is one code path for both.
 
-**`no_titlebar` leaves the top frame band behind.** The top edge is the only one that
-carries two things, and it has three states: full bar, a `BORDER`-thick frame band when
-the bar is hidden, nothing when both rules are set. Everything along the top is measured
-from that reserve, so `no_titlebar` moves the client from `y = 26` to `y = 5` (not 0) and
-grows it by `bar_height − BORDER`; `no_border` moves it from `x = 5` to `x = 0` and widens
-it by `2 × BORDER`. The side strips then skip their top grab marker, which is measured
-from a bar that is no longer there.
+**`show_titlebar = false` leaves the top frame band behind.** The top edge is the only one
+that carries two things, and it has three states: full bar, a `BORDER`-thick frame band when
+the bar is hidden, nothing when both flags are set. Everything along the top is measured
+from that reserve, so hiding the bar moves the client from `y = 26` to `y = 5` (not 0) and
+grows it by `bar_height − BORDER`; hiding the border moves it from `x = 5` to `x = 0` and
+widens it by `2 × BORDER`. The side strips then skip their top grab marker, which is
+measured from a bar that is no longer there. Measured live on a `cde-test` window at
+`[1725,26] 1710x1359`: border off `→ [1720,26] 1720x1364`, border back and bar off
+`→ [1725,5] 1710x1380`, both off `→ [1720,0] 1720x1390`.
 
 **A hidden edge reserves NOTHING — `getPositioningInfo` returns `reserved = false` with zero
 extents.** Blanking the pixels would leave a hole where the chrome used to be; the client has
@@ -619,26 +651,28 @@ strip also takes no clicks and leaves no corner grab squares.
 box when a sibling is unplaced, and with nothing reserved on that edge **the client edges it
 falls back to ARE the window's outer edges** — the same identity, arrived at by default.
 
-**No `window.updateRules` listener, deliberately.** Hyprland already repositions a window
-itself when a rule is applied to it — measured: eval'ing the rule at a live window moved its
-client immediately, no reload. An earlier revision added a listener calling
-`g_pDecorationPositioner->onWindowUpdate()` from that event, which means re-entering the
-positioner from inside rule evaluation. It was cut rather than debugged, because
-`config.reloaded` already re-lays out every window and a rule change needs a
-`hyprctl reload` anyway (see `## Bar height`).
+**`window.updateRules` invalidates pixels only.** The listener calls `invalidate()` +
+`damageBar()` for that window's decorations, which is what makes a colour rule or a
+`show_title` change appear immediately. It does **not** call the positioner: Hyprland
+repositions a window itself when a rule is applied to it — measured: eval'ing
+`cde:show_border = false` at a live window moved its client from `[1725,721] 1710x664` to
+`[1720,721] 1720x669` with no reload and no plugin involvement, and the frame pixels
+vanished. Toggling back restored it, stable across frames. An earlier revision added
+`g_pDecorationPositioner->onWindowUpdate()` from this event, which re-enters the positioner
+from inside rule evaluation; it was never needed.
 
-**The Lua config backend validates namespaced keys against the registered effects, so a
-plugin rule works there — as a QUOTED key.** `hl.window_rule({ ..., ["cde:no_titlebar"] = true })`
-is accepted; the bare identifier form is a syntax error, and an unregistered name is rejected
-with `unknown field`, which is a useful check that the plugin is loaded. There is no
-dot-bracket-free spelling: `cde_no_titlebar = true` is rejected as an unknown field.
+**The Lua config backend validates rule names, and a namespaced rule is a QUOTED key.**
+`hl.window_rule({ ..., ["cde:color_face"] = "rgb(ff0000)" })` is accepted. The **bare**
+option suffix is not the rule name: `show_titlebar = false` in a `hl.window_rule` reloaded
+"ok" and did nothing, because it is a different key, not because it was rejected. Spell the
+`cde:` prefix and quote it.
 
-**A rule added with `hyprctl eval` is NOT removed by `hyprctl reload`.** Measured: after
-evaluating `cde:no_titlebar` for one class and reloading, that window still had both
-effects in `m_ruleCombinator`'s custom-prop map (`keys=[88='true' 87='true']`) and still
-rendered without chrome. Only a compositor restart clears it. This bites when testing —
-a window kept without its title bar after a reload is usually a leftover test rule, not a
-bug, and `props.size` on that window is the tell.
+**A rule added with `hyprctl eval` is NOT removed by `hyprctl reload`.** Measured with the
+old names and unchanged by this work: after evaluating a rule for one class and reloading,
+that window still had both effects in its custom-prop map and still rendered without chrome.
+Only a compositor restart clears it. This bites when testing — a window kept without its
+title bar after a reload is usually a leftover test rule, not a bug, and `props.size` on
+that window is the tell.
 
 `unregisterEffect` blanks the name rather than erasing it, so re-registering after an
 unload takes a **fresh slot** — a slow leak, one entry per load/unload cycle, bounded by a
@@ -703,7 +737,7 @@ rect. Hand-rolled arithmetic beat both obvious alternatives, on measurement:
   one strip is hidden by a rule.
 
 **The outer rect does not move when a rule hides part of the chrome** — measured: with
-`cde:no_titlebar` on a helium, `hyprctl clients` went `[5,26] 1710x1409` → `[5,0] 1710x1435`
+`cde:show_titlebar = false` on a helium, `hyprctl clients` went `[5,26] 1710x1409` → `[5,0] 1710x1435`
 while this stayed `[0,0] 1720x1440`. The client absorbs the freed space and the window does
 not resize, so the outer box is invariant and is simply the window's own box. That is also
 why a pixel check is the only thing that settles it: both readings fit the arithmetic, and
@@ -726,6 +760,9 @@ this table is the same list.
 | `color_light` | colour | `#d1d1d1` |
 | `color_dark` | colour | `#4e4e4e` |
 | `show_buttons` | bool | `true` |
+| `show_titlebar` | bool | `true` |
+| `show_border` | bool | `true` |
+| `show_title` | bool | `true` |
 | `color_title` | colour | `#b0b0b0` |
 | `color_title_shadow` | colour | `#000000` |
 | `title_font_size` | int | `12` |
@@ -736,7 +773,11 @@ this table is the same list.
 | `color_title_active` | colour | `#ffffff` |
 
 There is no `color_highlight`: it was removed as never-drawn. `MIN_BAR_HEIGHT` (16) and
-`MIN_TITLE_FONT_SIZE` (6) live in `chrome.hpp` and are the clamps `config()` applies.
+`MIN_TITLE_FONT_SIZE` (6) live in `chrome.hpp` and are the clamps `globalConfig()` applies.
+
+**Every option has a same-named window rule** — option `plugin:cde:X` is rule `cde:X` — see
+`## Window rules`. `bar_height`, `title_font`, `title_font_size` and `show_buttons` are
+global only; `configFor(window)` overrides colours and the three `show_*` flags.
 
 Un-suffixed colours apply to **unfocused** windows, `_active` to the focused one. The
 active face/light/dark are measured from new-standard.png.
@@ -1015,21 +1056,7 @@ all four sides.
 
 ## Roadmap
 
-1. **Rule-settable colours.** The registration plumbing already exists — `registerRules` /
-   `unregisterRules` in `src/config.cpp` — so this is four more `registerEffect` calls
-   (`cde:face`, `cde:light`, `cde:dark`, `cde:title`) and a per-window config read:
-   ```cpp
-   Desktop::Rule::windowEffects()->registerEffect("cde:face");
-   ```
-   `configFor(PHLWINDOW)` reads the global config, then overrides any colour present in
-   `window->m_ruleApplicator->m_otherProps.props` — **rule wins over config, one colour at
-   a time**, so a rule may set `cde:face` alone and inherit the rest.
-   ```lua
-   windowrulev2 = float, title:^(kitty)$, cde:face rgb(ff00aa55)
-   ```
-   Needs an `Event::bus()->m_events.window.updateRules` listener to invalidate that window,
-   or a rule change will not redraw until something else does. Cheap and self-contained.
-2. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
+1. Resolve the double-drawn active border, or document the `border_size = 0` workaround.
 
 ## Non-goals
 
