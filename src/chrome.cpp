@@ -142,7 +142,7 @@ namespace {
                                "FFFDD"
                                "FFFDD"
                                "DFFDD";
-    constexpr const char* BL = "LLLFD"
+    constexpr const char* BL = "LLFFD"
                                "LLFFF"
                                "LLFFF"
                                "LDDDD"
