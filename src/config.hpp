@@ -73,6 +73,11 @@ namespace CDE {
     // title field. Painting is the only thing this changes — no geometry moves.
     bool titleHidden(PHLWINDOW window);
 
+    // Whether the title bar buttons are drawn. `show_buttons` has no window rule, so this is
+    // a global read: the hover path asks it on every mouse move and must not parse the whole
+    // palette to answer a yes/no question.
+    bool buttonsShown();
+
     // The palette for one window: current config values plus any window-rule overrides.
     // A null window yields the global config unchanged. Safe to call per raster, it never
     // caches.

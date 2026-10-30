@@ -212,6 +212,10 @@ namespace CDE {
             Desktop::Rule::windowEffects()->unregisterEffect(id);
     }
 
+    bool buttonsShown() {
+        return showButtons->value();
+    }
+
     bool edgeHidden(PHLWINDOW window, uint32_t edge) {
         const SChromeFlags flags = chromeFlags(window);
         return edge == DECORATION_EDGE_TOP ? !flags.titlebar : !flags.border;

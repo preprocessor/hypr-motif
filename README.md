@@ -104,6 +104,19 @@ hl.window_rule({
 })
 ```
 
+`rgba(...)` is accepted, but the chrome is opaque: the alpha channel is parsed and dropped,
+the same as a config colour with alpha. Use a solid colour if in doubt.
+
+**Upgrading from the old rules.** `cde:no_titlebar`, `cde:no_border` and `cde:no_title` were
+removed and are not replaced by aliases — rename them and invert the value, or the Lua config
+backend rejects the rule on the next reload:
+
+| old | new |
+| --- | --- |
+| `["cde:no_titlebar"] = true` | `["cde:show_titlebar"] = false` |
+| `["cde:no_border"] = true` | `["cde:show_border"] = false` |
+| `["cde:no_title"] = true` | `["cde:show_title"] = false` |
+
 A hidden strip reserves no space, so the window closes up over it; `show_titlebar = false`
 with `show_border = true` leaves the 5px top frame band, and both together leave only the
 client. A rule evaluated at a live window applies immediately — colours repaint and the
