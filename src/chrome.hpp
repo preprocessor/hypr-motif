@@ -22,6 +22,16 @@ namespace CDE {
     // Outranks Hyprland's own border decoration, which otherwise draws a second frame.
     inline constexpr int DECO_PRIORITY = 10005;
 
+    // The frame strips must be positioned BEFORE the bar, not merely alongside it. The
+    // positioner places a single-edge decoration inside the space the higher-priority
+    // edges have already taken, so a LEFT/RIGHT strip placed after the TOP one starts one
+    // bar-height DOWN and is given `client.h + barHeight` of height — its box then hangs
+    // 2 * barHeight - BORDER below the window. Painting still uses outerBox(), so nothing
+    // looks wrong, but `getBoxWithIncludedDecos` (which Hyprland's drop shadow measures)
+    // unions that box in and the shadow grows a band below the window. Below, not above:
+    // the bar's own box is correct either way.
+    inline constexpr int DECO_PRIORITY_FRAME = 10006;
+
     // Vertical, top-down, for a BAR_HEIGHT of 22:
     //   rows 0-1  light   outer top bevel
     //   rows 2-3  face

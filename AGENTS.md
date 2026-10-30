@@ -993,11 +993,25 @@ would read as a valid cache hit on the first frame of an unfocused window.
 
 The plugin draws **no shadow**. A previous revision rendered an ordered 8x8 Bayer dither on
 the right and bottom edges; renderer, `shadowBox()`, `m_shadowTex` and all
-`plugin:cde:shadow_*` config values are gone. Do not reintroduce one by accident — in
-particular `decoration:shadow:enabled` now renders Hyprland's own shadow unopposed, which
-previously mis-sized its bottom edge to ~46px when a plugin reserved space (measured;
-mechanism unknown, `getPositioningInfo()` has no body in the shipped headers). If
-Hyprland's shadow looks wrong, leave it off.
+`plugin:cde:shadow_*` config values are gone. Do not reintroduce one by accident —
+`decoration:shadow:enabled` renders Hyprland's own drop shadow, and it now measures the
+window correctly.
+
+**The ~46px band below the window was a decoration-order bug, not a shadow bug.** A drop
+shadow is `getBoxWithIncludedDecos(client) + range`, and that helper unions the boxes the
+positioner assigned to every `DECORATION_PART_OF_MAIN_WINDOW` deco. The positioner places a
+single-edge deco *inside* the space the higher-priority edges have already taken: a
+`LEFT`/`RIGHT` strip sorted after the `TOP` bar gets `y = client.y + barHeight` and
+`height = client.h + barHeight`, so its box reaches `2 * barHeight - BORDER` past the
+window's bottom (measured: 47px at a 26px bar). Painting was never affected — `outerBox()`
+comes from the sibling boxes, not this one — so the only symptom was the shadow. All four
+strips used to share `DECO_PRIORITY` and the positioner's sort is not stable, so which edge
+landed last varied per window and per decoration list; that is why the band came and went.
+The frame edges now carry `DECO_PRIORITY_FRAME` (higher) and the bar `DECO_PRIORITY`, so
+left/right/bottom are always placed before it: they get the bare client band, and the bar
+placed last expands over their extents to the full window width. Verified by pixel diff —
+the bars are byte-identical before and after, and the shadow is a `range`-wide gradient on
+all four sides.
 
 ## Roadmap
 

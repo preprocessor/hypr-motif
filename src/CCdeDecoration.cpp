@@ -84,7 +84,7 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
     SDecorationPositioningInfo info;
     info.policy   = DECORATION_POSITION_STICKY;
     info.edges    = m_edge;
-    info.priority = CDE::DECO_PRIORITY;
+    info.priority = isTop() ? CDE::DECO_PRIORITY : CDE::DECO_PRIORITY_FRAME;
     info.reserved = true;
 
     // A rule switched this strip off: reserve nothing, so the client grows into the space
