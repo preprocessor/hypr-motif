@@ -145,8 +145,9 @@ target_link_libraries(cde PRIVATE PkgConfig::HYPRLAND)
 **Three build systems, because three consumers need three things.** `CMakeLists.txt` is
 the real one and what the flake uses — it is the only one with `install(TARGETS)`, which is
 what makes nixpkgs' install phase put the `.so` in `$out/lib`. `Makefile` exists because
-hyprpm runs `make all` and reads `cde.so` straight out of the source tree
-(`hyprpm.toml`); it deliberately has **no** `install` target, matching hyprbars.
+hyprpm runs `make all` and reads the `output` path straight out of the source tree; its
+target is **parsed from `hyprpm.toml`**, so the manifest and the built file cannot
+disagree. It deliberately has **no** `install` target, matching hyprbars.
 `meson.build` is for meson users. Keep the source list in `meson.build` explicit rather
 than globbed — it is four files and a glob would silently survive a rename.
 

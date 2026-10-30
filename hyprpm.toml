@@ -2,6 +2,10 @@
 name = "hypr-CDE-borders"
 authors = ["wyspr"]
 
+# `commit_pins = [["<hyprland commit>", "<plugin commit>"], ...]` can be added here when
+# cutting a release; without pins hyprpm builds the current HEAD, which is what you want
+# while the plugin is still moving.
+
 [cde]
 description = "Common Desktop Environment (Motif) window chrome for Hyprland"
 authors = ["wyspr"]

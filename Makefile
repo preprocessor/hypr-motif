@@ -16,9 +16,10 @@ TARGET = cde.so
 all: $(TARGET)
 
 $(TARGET): $(SRC)
+	@mkdir -p $(dir $(TARGET))
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(EXTRA_FLAGS) $(INCLUDES) $^ -o $@ $(LIBS)
 
 clean:
-	rm -f ./$(TARGET)
+	rm -f $(TARGET)
 
 .PHONY: all clean
