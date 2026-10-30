@@ -3,17 +3,13 @@
 Common Desktop Environment (Motif) window chrome for Hyprland, drawn procedurally with
 Cairo at runtime — there are no image assets.
 
-![Motif title bar](examples/CDE-7.png)
+![Motif title bar](example.png)
 
 ## Features
 
-- Three-band 5px bevel frame on the left, right and bottom, with mitred corners and a
-  continuous top edge.
 - Fielded Motif title bar: close on the left, float and fullscreen on the right, each in
   its own separator-delimited field.
-- Aliased title text with a hard 1px shadow, centred in the title field. Drag rules mark
-  the draggable area.
-- Hover and press invert a button's bevel.
+- Aliased title text with a hard 1px shadow, centred in the title field.
 - Bar dragging and bottom-corner resizing.
 - Separate palette for the focused window.
 - Per-window rules to hide the bar, the title text or the frame (below).
@@ -87,33 +83,9 @@ eval` alone does not trigger the reload that repaints them.
 
 `no_titlebar` and `no_border` together leave only the client.
 
-```ini
-windowrulev2 = cde:no_titlebar, class:^(kitty)$
-```
-
-Under a Lua config the effect name has to be a **quoted key**:
-
 ```lua
 hl.window_rule({ match = { class = "^kitty$" }, ["cde:no_titlebar"] = true })
 ```
-
-## Interaction
-
-| where | action |
-| --- | --- |
-| bare bar | drag the window |
-| bottom corner grab squares | resize the window |
-| close button | close the window |
-| float button | toggle floating |
-| fullscreen button | toggle fullscreen |
-
-Drag and resize go through the compositor's own drag, so `binds:drag_threshold`,
-float-on-drag, snapping and drag-into-group apply as configured. Only the bottom corner
-squares are resize handles; the top pair is decorative.
-
-**Buttons need `binds:pass_mouse_when_bound = true`** if you bind `mouse:272` — Hyprland
-otherwise consumes the press before the decoration sees it, and bar dragging dies with the
-buttons.
 
 ## Reporting geometry
 
