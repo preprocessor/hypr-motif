@@ -82,7 +82,7 @@ static CBox outerBoxOf(PHLWINDOW window) {
     const bool   noFrame  = CDE::edgeHidden(window, DECORATION_EDGE_LEFT);
     // The top band is the bar, or the frame's own BORDER once `cde:no_titlebar` hides the
     // bar. Both rules hide the band entirely.
-    const double top      = noBar ? (noFrame ? 0 : CDE::BORDER) : CDE::config().barHeight;
+    const double top      = noBar ? (noFrame ? 0 : CDE::BORDER) : CDE::configFor(window).barHeight;
     const double side     = noFrame ? 0 : CDE::BORDER;
 
     return {client.x - side, client.y - top, client.w + side * 2, client.h + top + side};

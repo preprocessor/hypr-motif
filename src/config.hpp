@@ -63,8 +63,10 @@ namespace CDE {
     // field. Painting is the only thing this changes — no geometry moves.
     bool titleHidden(PHLWINDOW window);
 
-    // Reads current values; safe to call per raster, it never caches.
-    SConfig config();
+    // The palette for one window: current config values plus any window-rule overrides.
+    // A null window yields the global config unchanged. Safe to call per raster, it never
+    // caches.
+    SConfig configFor(PHLWINDOW window);
 
     // Bumped on config.reloaded. Decorations compare against it to force a re-raster.
     void     bumpGeneration();

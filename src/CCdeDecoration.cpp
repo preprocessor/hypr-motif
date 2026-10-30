@@ -79,7 +79,7 @@ bool CCdeDecoration::suppressed() const {
 }
 
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
-    const auto& cfg = CDE::config();
+    const CDE::SConfig cfg = CDE::configFor(m_window.lock());
 
     SDecorationPositioningInfo info;
     info.policy   = DECORATION_POSITION_STICKY;
@@ -202,7 +202,7 @@ Layout::eRectCorner CCdeDecoration::cornerAt(const Vector2D& globalPos) const {
         return Layout::CORNER_NONE;
 
     const CBox   win  = windowBox();
-    const double grab = CDE::cornerGrab(CDE::config().barHeight);
+    const double grab = CDE::cornerGrab(CDE::configFor(self).barHeight);
 
     if (!win.w || !win.h)
         return Layout::CORNER_NONE;
@@ -287,7 +287,7 @@ void CCdeDecoration::retexture(float scale) {
     // drift apart.
     const CBox         box = outerBox();
     const bool         act = isActive();
-    const CDE::SConfig cfg = CDE::config();
+    const CDE::SConfig cfg = CDE::configFor(m_window.lock());
 
     const bool barVisible = !CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP);
 
@@ -324,7 +324,7 @@ bool CCdeDecoration::syncHover(const Vector2D& globalPos) {
 
     int under = CDE::BTN_NONE;
     if (m_cachedBar.w > 0 && m_cachedBar.h > 0 && m_cachedBar.containsPoint(globalPos))
-        under = CDE::buttonAt(m_cachedBar.size(), globalPos - m_cachedBar.pos(), CDE::config().showButtons);
+        under = CDE::buttonAt(m_cachedBar.size(), globalPos - m_cachedBar.pos(), CDE::configFor(m_window.lock()).showButtons);
 
     if (under == m_hovered)
         return false;
@@ -486,7 +486,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         return false;
 
     const Vector2D size    = outerBox().size(); // match the widened bar the glyphs were drawn into
-    const bool     buttons = CDE::config().showButtons;
+    const bool     buttons = CDE::configFor(m_window.lock()).showButtons;
 
     // `pos` is GLOBAL, not bar-relative: checkInputOnDecos forwards the very coords it
     // tested with containsPoint(), and the built-in group bar converts them the same way.

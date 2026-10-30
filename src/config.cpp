@@ -29,6 +29,27 @@ namespace {
 
     uint64_t g_generation = 0;
 
+    CDE::SConfig globalConfig() {
+        // Designated initialisers, in SConfig's own order, so the mapping from option to
+        // field is one readable line each. The clamps are what stops a nonsensical value
+        // producing a bar the geometry cannot be drawn into.
+        return {
+            .barHeight    = std::max(CDE::MIN_BAR_HEIGHT, static_cast<int>(barHeight->value())),
+            .showButtons  = showButtons->value(),
+            .titleFontSize = std::max(CDE::MIN_TITLE_FONT_SIZE, static_cast<int>(titleFontSize->value())),
+            .titleFont    = titleFont->value(),
+            .face         = CHyprColor(face->value()),
+            .light        = CHyprColor(light->value()),
+            .dark         = CHyprColor(dark->value()),
+            .title        = CHyprColor(title->value()),
+            .titleShadow  = CHyprColor(titleShadow->value()),
+            .faceActive   = CHyprColor(faceActive->value()),
+            .lightActive  = CHyprColor(lightActive->value()),
+            .darkActive   = CHyprColor(darkActive->value()),
+            .titleActive  = CHyprColor(titleActive->value()),
+        };
+    }
+
 } // namespace
 
 namespace CDE {
@@ -106,25 +127,11 @@ namespace CDE {
         return window->m_ruleApplicator->m_otherProps.props.contains(g_noTitle);
     }
 
-    SConfig config() {
-        // Designated initialisers, in SConfig's own order, so the mapping from option to
-        // field is one readable line each. The clamps are what stops a nonsensical value
-        // producing a bar the geometry cannot be drawn into.
-        return {
-            .barHeight    = std::max(CDE::MIN_BAR_HEIGHT, static_cast<int>(barHeight->value())),
-            .showButtons  = showButtons->value(),
-            .titleFontSize = std::max(CDE::MIN_TITLE_FONT_SIZE, static_cast<int>(titleFontSize->value())),
-            .titleFont    = titleFont->value(),
-            .face         = CHyprColor(face->value()),
-            .light        = CHyprColor(light->value()),
-            .dark         = CHyprColor(dark->value()),
-            .title        = CHyprColor(title->value()),
-            .titleShadow  = CHyprColor(titleShadow->value()),
-            .faceActive   = CHyprColor(faceActive->value()),
-            .lightActive  = CHyprColor(lightActive->value()),
-            .darkActive   = CHyprColor(darkActive->value()),
-            .titleActive  = CHyprColor(titleActive->value()),
-        };
+    SConfig configFor(PHLWINDOW window) {
+        // Window-rule overrides land here in the next task; the window is taken now so every
+        // caller is already shaped correctly and the painters never see a global palette.
+        (void)window;
+        return globalConfig();
     }
 
     void bumpGeneration() {
