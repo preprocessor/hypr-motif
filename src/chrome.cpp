@@ -562,17 +562,27 @@ namespace CDE {
     // height so they take the top pair (painting over the bar's top rows, which is what
     // makes the bevel read as spanning the full width), and the bottom strip is drawn last
     // so it takes the bottom pair. No reordering needed.
-    void drawFrameStrip(cairo_t* cr, uint32_t edge, Vector2D size, const SPalette& p, int barHeight) {
+    //
+    // The TOP case is the band that remains when `cde:no_titlebar` hides the bar: it is
+    // drawn first, and the side strips' TL/TR land on its ends exactly as they do on the
+    // bar's top rows.
+    void drawFrameStrip(cairo_t* cr, uint32_t edge, Vector2D size, const SPalette& p, int barHeight, bool barVisible) {
         // The grab square is measured along the BAR's height, so the same value marks the
         // grab square here as it does on the bar.
         const int grab = cornerGrab(barHeight);
 
         switch (edge) {
+            case DECORATION_EDGE_TOP:
+                bevelBandsHorizontal(cr, 0, 0, size.x, bevelBandsFor(false), p);
+                break;
+
             case DECORATION_EDGE_LEFT:
                 bevelBandsVertical(cr, 0, 0, size.y, bevelBandsFor(false), p);
                 drawCorner(cr, 0, 0, TL, p);
-                // One rule at each end. The top one lands on the bar's bottom edge.
-                grabRuleAcross(cr, 0, grab, p, false);
+                // The top rule marks the top grab square, which is measured from a bar that
+                // no longer exists when the bar is hidden — it would land over the client.
+                if (barVisible)
+                    grabRuleAcross(cr, 0, grab, p, false);
                 grabRuleAcross(cr, 0, size.y - grab - SIDES_PAIRED, p, false);
                 break;
 
@@ -580,7 +590,8 @@ namespace CDE {
                 bevelBandsVertical(cr, 0, 0, size.y, bevelBandsFor(true), p);
                 drawCorner(cr, 0, 0, TR, p);
                 // `true`: on this strip the outermost pixel is the dark one.
-                grabRuleAcross(cr, 0, grab, p, true);
+                if (barVisible)
+                    grabRuleAcross(cr, 0, grab, p, true);
                 grabRuleAcross(cr, 0, size.y - grab - SIDES_PAIRED, p, true);
                 break;
 
@@ -597,9 +608,9 @@ namespace CDE {
         }
     }
 
-    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active) {
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active, bool barVisible) {
         const SPalette p = paletteFor(cfg, active);
-        return rasterise(size, scale, [&](cairo_t* cr) { drawFrameStrip(cr, edge, size, p, cfg.barHeight); });
+        return rasterise(size, scale, [&](cairo_t* cr) { drawFrameStrip(cr, edge, size, p, cfg.barHeight, barVisible); });
     }
 
 } // namespace CDE

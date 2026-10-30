@@ -77,9 +77,13 @@ static SP<SHyprCtlCommand> g_hyprCtlCommand;
 // The extents are the ones getPositioningInfo reserves, so this cannot drift from the screen:
 // a strip a rule hid reserves nothing and contributes nothing here either.
 static CBox outerBoxOf(PHLWINDOW window) {
-    const CBox   client = window->getWindowMainSurfaceBox();
-    const double top    = CDE::edgeHidden(window, DECORATION_EDGE_TOP) ? 0 : CDE::config().barHeight;
-    const double side   = CDE::edgeHidden(window, DECORATION_EDGE_LEFT) ? 0 : CDE::BORDER;
+    const CBox   client   = window->getWindowMainSurfaceBox();
+    const bool   noBar    = CDE::edgeHidden(window, DECORATION_EDGE_TOP);
+    const bool   noFrame  = CDE::edgeHidden(window, DECORATION_EDGE_LEFT);
+    // The top band is the bar, or the frame's own BORDER once `cde:no_titlebar` hides the
+    // bar. Both rules hide the band entirely.
+    const double top      = noBar ? (noFrame ? 0 : CDE::BORDER) : CDE::config().barHeight;
+    const double side     = noFrame ? 0 : CDE::BORDER;
 
     return {client.x - side, client.y - top, client.w + side * 2, client.h + top + side};
 }

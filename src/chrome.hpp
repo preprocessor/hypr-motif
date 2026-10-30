@@ -121,9 +121,10 @@ namespace CDE {
     // config() inside — see the code-style rule in AGENTS.md.
     SP<Render::ITexture> renderBar(Vector2D size, float scale, int hovered, int pressed, const std::string& title, const SConfig& cfg, bool active);
 
-    // The frame strip for a non-top edge. `edge` is an eDecorationEdges value; the
-    // strip's own width/height is whichever axis is the border thickness.
-    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active);
+    // The frame strip for one edge: left, right, bottom, or the top band that replaces the
+    // bar when `cde:no_titlebar` hides it. `barVisible` tells the side strips whether their
+    // top grab marker still has a bar to sit on.
+    SP<Render::ITexture> renderBorder(uint32_t edge, Vector2D size, float scale, const SConfig& cfg, bool active, bool barVisible);
 
     // Which button a bar-local point is over, or BTN_NONE.
     //

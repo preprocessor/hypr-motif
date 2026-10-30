@@ -67,7 +67,15 @@ void CCdeDecoration::removeAll(HANDLE handle) {
 }
 
 bool CCdeDecoration::suppressed() const {
-    return CDE::edgeHidden(m_window.lock(), m_edge);
+    const PHLWINDOW self = m_window.lock();
+
+    // The top edge has two things to draw — the bar, and the top frame band behind it when
+    // `cde:no_titlebar` hides the bar — so it only disappears when BOTH rules hide them.
+    // Every other edge is the frame alone, which `cde:no_border` switches off.
+    if (isTop())
+        return CDE::edgeHidden(self, DECORATION_EDGE_TOP) && CDE::edgeHidden(self, DECORATION_EDGE_LEFT);
+
+    return CDE::edgeHidden(self, m_edge);
 }
 
 SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
@@ -90,7 +98,11 @@ SDecorationPositioningInfo CCdeDecoration::getPositioningInfo() {
 
     // SBoxExtents.topLeft is {left, top}; bottomRight is {right, bottom}.
     switch (m_edge) {
-        case DECORATION_EDGE_TOP: info.desiredExtents = {{0, cfg.barHeight}, {0, 0}}; break;
+        case DECORATION_EDGE_TOP:
+            // The bar, or just the frame band when `cde:no_titlebar` hides the bar. The band
+            // is BORDER thick so the frame reads the same on all four sides.
+            info.desiredExtents = {{0, CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP) ? CDE::BORDER : cfg.barHeight}, {0, 0}};
+            break;
         case DECORATION_EDGE_LEFT: info.desiredExtents = {{CDE::BORDER, 0}, {0, 0}}; break;
         case DECORATION_EDGE_RIGHT: info.desiredExtents = {{0, 0}, {CDE::BORDER, 0}}; break;
         case DECORATION_EDGE_BOTTOM: info.desiredExtents = {{0, 0}, {0, CDE::BORDER}}; break;
@@ -277,10 +289,15 @@ void CCdeDecoration::retexture(float scale) {
     const bool         act = isActive();
     const CDE::SConfig cfg = CDE::config();
 
-    if (isTop())
+    const bool barVisible = !CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP);
+
+    // A top edge with no bar is the frame's top band, not a title bar: same painter as the
+    // other three sides. `barVisible` also tells the side strips whether their top grab
+    // marker still has a bar to sit on.
+    if (isTop() && barVisible)
         m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, cfg, act);
     else
-        m_barTex = CDE::renderBorder(m_edge, box.size(), scale, cfg, act);
+        m_barTex = CDE::renderBorder(m_edge, box.size(), scale, cfg, act, barVisible);
 
     m_lastTitle   = m_window->m_title;
     m_lastScale   = scale;
@@ -456,10 +473,12 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         return false;
     }
 
-    // Only the top edge has buttons; the rest is frame. `false` here means "not handled":
-    // returning true would be read by checkInputOnDecos() as CONSUMED, which on the frame
-    // would swallow a drag dropped over it and cancel a `movewindow` bind started there.
-    if (!isTop())
+    // Only the bar has buttons. The frame edges are pass-through, and so is a top edge
+    // whose bar is hidden (`cde:no_titlebar`) — that one is just the top frame band, not a
+    // drag handle. `false` here means "not handled": returning true would be read by
+    // checkInputOnDecos() as CONSUMED, swallowing a drag dropped over the frame and
+    // cancelling a `movewindow` bind started there.
+    if (!isTop() || CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP))
         return false;
 
     const Vector2D size    = outerBox().size(); // match the widened bar the glyphs were drawn into

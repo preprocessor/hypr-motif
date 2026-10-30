@@ -64,13 +64,13 @@ hyprctl plugin unload ~/.local/share/hyprland/plugins/libcde-old.so
 hyprctl plugin load ~/.local/share/hyprland/plugins/libcde-next.so
 hyprctl plugin list | grep -c "Plugin cde"            # must be 1
 nix build .#default                                 # packaging, needs a tracked tree
-nix flake check                                      # asserts hyprland == 0.56.2
 ```
 
-`flake.nix` pins `nixpkgs-unstable`, yielding **hyprland 0.56.2**, `aquamarine 0.15.1`,
-`cairo 1.18.4`. Treat those versions as exact. `checks.x86_64-linux.cde` is an
-`assert pkgs.hyprland.version == "0.56.2"` — it fails the moment the pin drifts, which is
-the one ABI failure a test on running code would not catch.
+`inputs.hyprland` comes from Hyprland's own flake, so it tracks **HEAD**, not the
+compositor this session runs. `packages.cde.override { hyprland = …; }` builds against a
+different compositor — use the nixpkgs 0.56.2 one unless you are also running HEAD. There
+is no `checks` output; the ABI match is enforced at load time by the API-hash check in
+`main.cpp`, so a mismatched plugin is refused with a notification instead of crashing.
 
 Build to a **new filename** every time — never over the one you are loading. The
 compositor keeps the old inode mapped and silently runs stale code.
@@ -376,8 +376,7 @@ one on the right, so on a dark-outer strip the outermost pixel of row two stays 
 `cornerGrab(barHeight) = max(MIN_CORNER_GRAB, barHeight - 1)`.
 Two reference data points agree on the relation — CDE-7's grab is 21 with a 22px bar,
 new-standard.png's is 24 with a 25px bar. Both are `BAR_HEIGHT - 1`, so it scales with
-`plugin:cde:bar_height`; `CORNER_GRAB_REF` in `chrome.hpp` is only the measured value for
-the default bar. This is the "corner accent", and it has to scale because it is measured
+`plugin:cde:bar_height`. This is the "corner accent", and it has to scale because it is measured
 along the bar's own height — the same distance marks the same square on the left, right and
 bottom frame strips, which is why one value drives all four corners. Verified live by
 changing the bar 22 → 30: the vertical rule moves from bar-rel 21 to 29, and at 22 it
@@ -592,9 +591,14 @@ them together rather than stretching the chrome.
 Two rule effects, registered with `Desktop::Rule::windowEffects()->registerEffect` in
 `pluginInit` and released in `PLUGIN_EXIT`: **`cde:no_titlebar`** hides the bar,
 **`cde:no_border`** hides the frame (left, right and bottom). Both together hide everything.
-Measured live, geometry and not just pixels: `no_titlebar` moves the client from
-`y = 26` to `y = 0` and grows it by exactly `bar_height`; `no_border` moves it from `x = 5`
-to `x = 0` and widens it by exactly `2 × BORDER`.
+
+**`no_titlebar` leaves the top frame band behind.** The top edge is the only one that
+carries two things, and it has three states: full bar, a `BORDER`-thick frame band when
+the bar is hidden, nothing when both rules are set. Everything along the top is measured
+from that reserve, so `no_titlebar` moves the client from `y = 26` to `y = 5` (not 0) and
+grows it by `bar_height − BORDER`; `no_border` moves it from `x = 5` to `x = 0` and widens
+it by `2 × BORDER`. The side strips then skip their top grab marker, which is measured
+from a bar that is no longer there.
 
 **A hidden edge reserves NOTHING — `getPositioningInfo` returns `reserved = false` with zero
 extents.** Blanking the pixels would leave a hole where the chrome used to be; the client has
@@ -929,7 +933,9 @@ Verify against the headers before trusting these; the plugin API moves between r
 - `getDecorationType()` must return `DECORATION_CUSTOM`.
 - Flags must include `DECORATION_ALLOWS_MOUSE_INPUT` (or buttons get no clicks) and
   `DECORATION_PART_OF_MAIN_WINDOW` (so shadows and animations account for the geometry).
-- `onInputOnDeco` returns `false` to swallow the event.
+- `onInputOnDeco` returns `true` to CONSUME the event (`checkInputOnDecos` stops on true);
+  `false` means "not handled" and lets `DRAG_START`/`DRAG_END`/focus proceed. Getting this
+  backwards on a frame strip silently swallows drag drops.
 - `Render::CGLTexture` is the only concrete `ITexture` in the shipped headers — the only
   way to get pixels on screen from a plugin.
 - Header root is `${hyprland.dev}/include/hyprland/src`.
