@@ -174,7 +174,21 @@ CBox CCdeDecoration::outerBox() const {
 // Which bottom corner grab square a GLOBAL point is in, or CORNER_NONE. One square spans
 // the bottom strip and the foot of both side strips, so which decoration happens to see
 // the press is an accident of iteration order — all four test the same two rects.
+//
+// Only the bottom pair is a live handle: the top pair's rules are drawn because the
+// reference has them, but a grab square there would sit on the close and maximize fields.
 Layout::eRectCorner CCdeDecoration::cornerAt(const Vector2D& globalPos) const {
+    const PHLWINDOW self = m_window.lock();
+    if (!self)
+        return Layout::CORNER_NONE;
+
+    // The grab square belongs to the bottom strip, which also draws its marker. With
+    // `cde:no_border` that strip is hidden, so there is nothing to grab — and without this
+    // the windowBox() fallback for the top decoration (whose `own` box is the BAR, not the
+    // window) would put both rects inside the bar, where they steal button clicks.
+    if (CDE::edgeHidden(self, DECORATION_EDGE_BOTTOM))
+        return Layout::CORNER_NONE;
+
     const CBox   win  = windowBox();
     const double grab = CDE::cornerGrab(CDE::config().barHeight);
 
@@ -325,9 +339,15 @@ void CCdeDecoration::endGesture() {
 
     // Cleared BEFORE ending: endDragTarget() routes back into this decoration's DRAG_END
     // handler, and re-entering a live endDrag() would be a mess.
-    m_dragging   = false;
-    m_dragArmed  = false;
-    m_barTex.reset();
+    //
+    // The texture is only dropped for a gesture that actually armed or started: this runs
+    // for every decoration on every left release, and an unconditional reset would throw
+    // away every window's chrome raster on each click.
+    const bool hadGesture = m_dragging || m_dragArmed;
+    m_dragging            = false;
+    m_dragArmed           = false;
+    if (hadGesture)
+        m_barTex.reset();
 
     // Only if the compositor still has OUR window. It ends the drag itself when the window
     // unmaps mid-drag (CWindow::onWindowRemoved), and ending someone else's drag — a
@@ -409,13 +429,12 @@ void CCdeDecoration::ensureTextures(float scale) {
 
 bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, std::any data) {
     // Nothing is left of this strip, so it has no buttons to press and no corner squares to
-    // arm a resize from. Answering here keeps that from being a question of exactly how the
-    // positioner sizes a zero-extent decoration.
+    // arm a resize from. Report it as NOT handled — a hidden edge must never consume input.
     if (suppressed())
-        return true;
+        return false;
 
     const auto* ev         = type == INPUT_TYPE_BUTTON ? std::any_cast<IPointer::SButtonEvent>(&data) : nullptr;
-    const bool   leftDown  = ev && ev->mouse && ev->button == BTN_LEFT && windowVisible();
+    const bool   leftDown  = ev && ev->button == BTN_LEFT && windowVisible();
 
     // The corner grab squares are tested before anything else and on EVERY edge: the square
     // spans the bottom strip and the foot of both sides, so which decoration gets the press
@@ -437,9 +456,11 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         return false;
     }
 
-    // Only the top edge has buttons; the rest is frame.
+    // Only the top edge has buttons; the rest is frame. `false` here means "not handled":
+    // returning true would be read by checkInputOnDecos() as CONSUMED, which on the frame
+    // would swallow a drag dropped over it and cancel a `movewindow` bind started there.
     if (!isTop())
-        return true;
+        return false;
 
     const Vector2D size    = outerBox().size(); // match the widened bar the glyphs were drawn into
     const bool     buttons = CDE::config().showButtons;
@@ -481,16 +502,20 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
                 }
             } else {
                 const int held = m_clickButton;
+
+                // Retire the press BEFORE acting. closeWindow() is async today, but the
+                // action is allowed to tear the window down, and nothing below may touch
+                // `this` after it. Ending the gesture first also un-highlights on both
+                // edges of a click, not just when the release lands elsewhere.
+                m_clickButton = CDE::BTN_NONE;
+                syncPressed();
+                endGesture();
+
                 if (held != CDE::BTN_NONE && held == hit)
                     runButtonAction(held);
-
-                // The release can land anywhere on the bar, so the drag ends here rather
-                // than waiting for the cursor to come back over it.
-                endGesture();
             }
 
-            syncPressed();
-            return false; // swallow both edges, so the click never reaches the client
+            return false; // not "handled": the press may still focus and raise the window
         }
 
         // Only a mouse `movewindow` bind gets here: it asks the window whether it wants to
@@ -508,7 +533,9 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
             syncPressed();
             return false;
 
-        default: return true;
+        // Anything else (axis, motion) is not ours: the bar must not eat input it does not
+        // act on.
+        default: return false;
     }
 }
 

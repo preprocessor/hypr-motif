@@ -330,7 +330,9 @@ namespace CDE {
     int buttonAt(Vector2D size, const Vector2D& p, bool showButtons) {
         for (int b = 0; b < BTN_COUNT; ++b) {
             const CBox f = buttonFieldRect(size, b, showButtons);
-            if (f.w && p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h)
+            // Half-open on the far edges: the field is [x, x+w). Including the far edge
+            // makes the separator column and the bar's bottom row part of the click target.
+            if (f.w && p.x >= f.x && p.x < f.x + f.w && p.y >= f.y && p.y < f.y + f.h)
                 return b;
         }
         return BTN_NONE;
@@ -456,8 +458,13 @@ namespace CDE {
         cairo_text_extents_t textExtents;
         cairo_text_extents(cr, title.c_str(), &textExtents);
 
-        // Shrink to fit rather than overflow into the button fields.
+        // Shrink to fit rather than overflow into the button fields. A field narrower than
+        // the padding has no room for text at all; scaling by a negative width would hand
+        // cairo a negative font size, so draw nothing.
         const double available = field.w - TITLE_PADDING;
+        if (available <= 0)
+            return {};
+
         if (textExtents.width > available && textExtents.width > 0) {
             cairo_set_font_size(cr, fontSize * available / textExtents.width);
             cairo_text_extents(cr, title.c_str(), &textExtents);
@@ -507,9 +514,9 @@ namespace CDE {
             return;
 
         // One face row between the lines, and the whole stack centred in the band: what is
-        // left over after those fixed gaps is the clearance above and below, which is 3px at
-        // the reference bar and grows with the bar. Distributing the slack between the lines
-        // instead would push them apart on a tall bar and pin them to the top.
+        // left over after those fixed gaps is the clearance above and below, which is 2px at
+        // the 22px reference bar and grows with the bar. Distributing the slack between the
+        // lines instead would push them apart on a tall bar and pin them to the top.
         const double edgeGap = std::floor((slack - DRAG_RULE_STACK_GAP * (DRAG_RULE_LINES - 1)) / 2);
         if (edgeGap < 1)
             return;
