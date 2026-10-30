@@ -1,4 +1,4 @@
-# hypr-CDE-borders
+# hypr-motif
 
 Common Desktop Environment (Motif) window chrome for Hyprland, drawn procedurally with
 Cairo at runtime — there are no image assets.
