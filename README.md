@@ -106,8 +106,9 @@ hl.window_rule({
 
 A hidden strip reserves no space, so the window closes up over it; `show_titlebar = false`
 with `show_border = true` leaves the 5px top frame band, and both together leave only the
-client. Rules apply at plugin load and on `hyprctl reload`; `hyprctl eval` alone does not
-re-evaluate the file the rules live in.
+client. A rule evaluated at a live window applies immediately — colours repaint and the
+`show_*` flags re-lay the window out, no reload needed. Rules in the config file are read
+at plugin load and on `hyprctl reload`.
 
 ## Reporting geometry
 
