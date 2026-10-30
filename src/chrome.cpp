@@ -534,7 +534,7 @@ namespace CDE {
             }
         };
 
-        // No text to flank — an empty title, or `cde:no_title` — so one rule marks the whole
+        // No text to flank — an empty title, or `show_title = false` — so one rule marks the whole
         // title field, which is now entirely drag area.
         if (titleBox.w <= 0) {
             rule(fieldStart, fieldEnd - fieldStart);
@@ -568,7 +568,7 @@ namespace CDE {
     // makes the bevel read as spanning the full width), and the bottom strip is drawn last
     // so it takes the bottom pair. No reordering needed.
     //
-    // The TOP case is the band that remains when `cde:no_titlebar` hides the bar: it is
+    // The TOP case is the band that remains when `show_titlebar = false` hides the bar: it
     // drawn first, and the side strips' TL/TR land on its ends exactly as they do on the
     // bar's top rows.
     void drawFrameStrip(cairo_t* cr, uint32_t edge, Vector2D size, const SPalette& p, int barHeight, bool barVisible) {

@@ -57,6 +57,9 @@ plugin {
 | --- | --- | --- | --- |
 | `bar_height` | int | `22` | bar height in logical pixels, min 16 |
 | `show_buttons` | bool | `true` | draw the three title bar buttons |
+| `show_titlebar` | bool | `true` | draw the title bar (and the bar's corner grab rules) |
+| `show_border` | bool | `true` | draw the left, right and bottom frame |
+| `show_title` | bool | `true` | draw the title text; the fields and drag rules stay |
 | `title_font` | string | `Chicago` | title font family, any fontconfig name |
 | `title_font_size` | int | `12` | title size in points, min 6 |
 | `color_face` | color | `#999999` | bar face, unfocused |
@@ -71,21 +74,40 @@ plugin {
 
 ## Window rules
 
-Rules remove parts of the chrome per window. A hidden strip reserves no space, so the
-window closes up over it. Rules apply at plugin load and on `hyprctl reload`; `hyprctl
-eval` alone does not trigger the reload that repaints them.
+**Every rule is a config key.** Rule `cde:X` overrides option `plugin:cde:X` on the
+windows it matches; a window without the rule inherits the option, and a rule that sets one
+key leaves the others alone. The nine colours and the three `show_*` flags all have one, and
+there are no other rule names.
 
 | rule | effect |
 | --- | --- |
-| `cde:no_titlebar` | hide the bar: buttons, title and drag area go, the 5px frame stays |
-| `cde:no_title` | hide only the title text; the drag rules span the whole title field |
-| `cde:no_border` | hide the frame: nothing on the left, right or bottom edge |
+| `cde:color_face` … `cde:color_title_shadow` | that colour, for this window |
+| `cde:color_face_active` … `cde:color_title_active` | that colour while the window is focused |
+| `cde:show_titlebar` | draw (or hide) the bar |
+| `cde:show_border` | draw (or hide) the left, right and bottom frame |
+| `cde:show_title` | draw (or hide) the title text |
 
-`no_titlebar` and `no_border` together leave only the client.
+Colours take the same syntax as the config file — `#rrggbb`, `rgb(rrggbb)`,
+`rgba(rrggbbaa)` — and a value that cannot be parsed is ignored, leaving the configured
+colour. Booleans take `true`/`false` (also `0`, `no`, `off`); a bare `[...] = true` counts
+as true.
+
+`cde:color_face` alone changes only the **unfocused** bar, so a focused window still paints
+its `_active` palette. Set both to pin a window's colour across focus.
 
 ```lua
-hl.window_rule({ match = { class = "^kitty$" }, ["cde:no_titlebar"] = true })
+hl.window_rule({
+    match = { class = "^kitty$" },
+    ["cde:show_titlebar"] = false,
+    ["cde:color_face"] = "rgb(2a2a2a)",
+    ["cde:color_face_active"] = "rgb(3a3a3a)",
+})
 ```
+
+A hidden strip reserves no space, so the window closes up over it; `show_titlebar = false`
+with `show_border = true` leaves the 5px top frame band, and both together leave only the
+client. Rules apply at plugin load and on `hyprctl reload`; `hyprctl eval` alone does not
+re-evaluate the file the rules live in.
 
 ## Reporting geometry
 
