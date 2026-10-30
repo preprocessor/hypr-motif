@@ -2,56 +2,41 @@
   description = "Common Desktop Environment (Motif) window chrome for Hyprland";
 
   inputs.nixpkgs.url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.zst";
+  inputs.hyprland.url = "github:hyprwm/Hyprland";
+  inputs.hyprland.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs =
     inputs:
     let
-      supportedSystems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
-      ];
-      forEachSystem =
-        f:
-        inputs.nixpkgs.lib.genAttrs supportedSystems (
-          system:
-          f {
-            pkgs = import inputs.nixpkgs { inherit system; };
-            lib = inputs.nixpkgs.lib;
-          }
-        );
+      inherit (inputs.nixpkgs) lib;
+      system = "x86_64-linux";
+      pkgs = inputs.nixpkgs.legacyPackages.${system};
+      hyprland = inputs.hyprland.packages.${system}.default;
     in
     {
-      devShells = forEachSystem (
-        { pkgs, ... }:
-        {
-          default = pkgs.mkShell.override { stdenv = pkgs.gcc14Stdenv; } {
-            name = "hypr-CDE-borders";
+      devShells.${system}.default = pkgs.mkShell.override { stdenv = pkgs.gcc14Stdenv; } {
+        name = "hypr-CDE-borders";
 
-            packages = [
-              pkgs.hyprland
-              pkgs.cmake
-              pkgs.pkg-config
-              pkgs.cairo
-              # For the pixel-diff check in AGENTS.md `## Verification`.
-              pkgs.grim
-              pkgs.imagemagick
-            ];
+        inputsFrom = [ hyprland ];
 
-            inputsFrom = [ pkgs.hyprland ];
-          };
-        }
-      );
+        packages = [
+          hyprland
+          pkgs.cmake
+          pkgs.pkg-config
+          pkgs.cairo
+        ];
+      };
 
-      packages = forEachSystem (
-        { pkgs, lib, ... }:
-        rec {
-          # A plain attrset rather than the `finalAttrs: { ... }` form: the latter is a
-          # function, so `nix build .#default` rejects it. mkHyprlandPlugin accepts either.
-          cde = pkgs.hyprlandPlugins.mkHyprlandPlugin {
+      packages.${system} = {
+        default = inputs.self.packages.${system}.cde;
+
+        cde = lib.makeOverridable (
+          { hyprland }:
+          pkgs.hyprlandPlugins.mkHyprlandPlugin {
             pluginName = "cde";
             version = "0.1";
+
+            inherit hyprland;
 
             src = ./.;
 
@@ -61,21 +46,16 @@
             # hyprbars, which ships both.
             nativeBuildInputs = [ pkgs.cmake ];
 
-            # The plugin's symbols are resolved by the compositor at dlopen time; stripping
-            # a backtrace out of a crash inside it is not worth the bytes.
             dontStrip = true;
 
             meta = {
               homepage = "https://github.com/wyspr/hypr-CDE-borders";
               description = "Common Desktop Environment (Motif) window chrome for Hyprland";
               license = lib.licenses.gpl3;
-              inherit (pkgs.hyprland.meta) platforms;
               maintainers = with lib.maintainers; [ wyspr ];
             };
-          };
-
-          default = cde;
-        }
-      );
+          }
+        ) { inherit hyprland; };
+      };
     };
 }
