@@ -3,6 +3,7 @@
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleEffectContainer.hpp>
 #include <hyprutils/memory/SharedPtr.hpp>
 
@@ -17,13 +18,14 @@ namespace {
     // with these unset — which is why it reads them without null-checking any of them.
     SP<Config::Values::CIntValue>   barHeight, titleFontSize;
     SP<Config::Values::CBoolValue>  showButtons;
+    SP<Config::Values::CStringValue> titleFont;
     SP<Config::Values::CColorValue> face, light, dark, title, titleShadow;
     SP<Config::Values::CColorValue> faceActive, lightActive, darkActive, titleActive;
 
-    // Ids the compositor handed back for our two rule effects. Zero is
+    // Ids the compositor handed back for our rule effects. Zero is
     // WINDOW_RULE_EFFECT_NONE, which is never a key in a window's custom-prop map, so it
     // doubles as "no such rule" without a separate sentinel.
-    Desktop::Rule::CWindowRuleEffectContainer::storageType g_noTitlebar = 0, g_noBorder = 0;
+    Desktop::Rule::CWindowRuleEffectContainer::storageType g_noTitlebar = 0, g_noBorder = 0, g_noTitle = 0;
 
     uint64_t g_generation = 0;
 
@@ -36,6 +38,7 @@ namespace CDE {
         // CHyprColor(uint64_t) consumes.
         barHeight     = makeShared<Config::Values::CIntValue>("plugin:cde:bar_height", "Title bar height in logical pixels", CDE::BAR_HEIGHT);
         titleFontSize = makeShared<Config::Values::CIntValue>("plugin:cde:title_font_size", "Title text size in points", CDE::TITLE_FONT_SIZE);
+        titleFont     = makeShared<Config::Values::CStringValue>("plugin:cde:title_font", "Title text font family (fontconfig name)", CDE::TITLE_FONT);
         showButtons  = makeShared<Config::Values::CBoolValue>("plugin:cde:show_buttons", "Whether to draw the title bar buttons", true);
         face         = makeShared<Config::Values::CColorValue>("plugin:cde:color_face", "Title bar face colour", 0xff999999);
         light        = makeShared<Config::Values::CColorValue>("plugin:cde:color_light", "Bevel highlight colour", 0xffd1d1d1);
@@ -55,6 +58,7 @@ namespace CDE {
         const std::vector<SP<Config::Values::IValue>> all = {
             barHeight,
             titleFontSize,
+            titleFont,
             showButtons,
             face,
             light,
@@ -75,11 +79,13 @@ namespace CDE {
     void registerRules() {
         g_noTitlebar = Desktop::Rule::windowEffects()->registerEffect("cde:no_titlebar");
         g_noBorder   = Desktop::Rule::windowEffects()->registerEffect("cde:no_border");
+        g_noTitle    = Desktop::Rule::windowEffects()->registerEffect("cde:no_title");
     }
 
     void unregisterRules() {
         Desktop::Rule::windowEffects()->unregisterEffect(g_noTitlebar);
         Desktop::Rule::windowEffects()->unregisterEffect(g_noBorder);
+        Desktop::Rule::windowEffects()->unregisterEffect(g_noTitle);
     }
 
     bool edgeHidden(PHLWINDOW window, uint32_t edge) {
@@ -93,6 +99,13 @@ namespace CDE {
         return props.contains(edge == DECORATION_EDGE_TOP ? g_noTitlebar : g_noBorder);
     }
 
+    bool titleHidden(PHLWINDOW window) {
+        if (!window || !window->m_ruleApplicator)
+            return false;
+
+        return window->m_ruleApplicator->m_otherProps.props.contains(g_noTitle);
+    }
+
     SConfig config() {
         // Designated initialisers, in SConfig's own order, so the mapping from option to
         // field is one readable line each. The clamps are what stops a nonsensical value
@@ -101,6 +114,7 @@ namespace CDE {
             .barHeight    = std::max(CDE::MIN_BAR_HEIGHT, static_cast<int>(barHeight->value())),
             .showButtons  = showButtons->value(),
             .titleFontSize = std::max(CDE::MIN_TITLE_FONT_SIZE, static_cast<int>(titleFontSize->value())),
+            .titleFont    = titleFont->value(),
             .face         = CHyprColor(face->value()),
             .light        = CHyprColor(light->value()),
             .dark         = CHyprColor(dark->value()),

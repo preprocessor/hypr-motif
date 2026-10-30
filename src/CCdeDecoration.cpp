@@ -291,11 +291,15 @@ void CCdeDecoration::retexture(float scale) {
 
     const bool barVisible = !CDE::edgeHidden(m_window.lock(), DECORATION_EDGE_TOP);
 
+    // `cde:no_title` hides the text but keeps the bar and its fields; an empty title makes
+    // the drag rules span the whole title field, which is then all drag area.
+    const std::string title = CDE::titleHidden(m_window.lock()) ? std::string{} : m_window->m_title;
+
     // A top edge with no bar is the frame's top band, not a title bar: same painter as the
     // other three sides. `barVisible` also tells the side strips whether their top grab
     // marker still has a bar to sit on.
     if (isTop() && barVisible)
-        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, m_window->m_title, cfg, act);
+        m_barTex = CDE::renderBar(box.size(), scale, m_hovered, m_pressed, title, cfg, act);
     else
         m_barTex = CDE::renderBorder(m_edge, box.size(), scale, cfg, act, barVisible);
 

@@ -192,7 +192,7 @@ Verified against live pixels, not arithmetic. Renders today:
 - **All three buttons act**, verified by real clicks against a live session: close →
   `Actions::closeWindow`, float toggle → `Actions::floatWindow(TOGGLE)`,
   maximize → `Actions::fullscreenWindow(FSMODE_FULLSCREEN)`. See `## Button input`.
-- **Two window rules** switch the bar and the frame off per window — see
+- **Three window rules** switch the bar, the title text and the frame off per window — see
   `## Window rules`.
 
 Gaps, in the order they bite:
@@ -588,9 +588,18 @@ them together rather than stretching the chrome.
 
 ## Window rules
 
-Two rule effects, registered with `Desktop::Rule::windowEffects()->registerEffect` in
+Three rule effects, registered with `Desktop::Rule::windowEffects()->registerEffect` in
 `pluginInit` and released in `PLUGIN_EXIT`: **`cde:no_titlebar`** hides the bar,
-**`cde:no_border`** hides the frame (left, right and bottom). Both together hide everything.
+**`cde:no_border`** hides the frame (left, right and bottom), and **`cde:no_title`** hides
+only the title text. The first two reserve space; the third changes pixels only — the bar,
+fields, buttons and drag rules stay.
+
+**`no_title` hands the whole title field to the drag rules.** `retexture` passes an empty
+title to `renderBar`, and `drawDragRules` treats an empty ink box as "nothing to flank":
+one group of lines spans `leftFieldEnd + DRAG_RULE_GAP` to `rightFieldStart −
+DRAG_RULE_GAP` instead of splitting around the text. An empty title string does the same,
+so there is one code path for both. A rule change needs `config.reloaded` like the others —
+the generation bump is what drops the cached texture.
 
 **`no_titlebar` leaves the top frame band behind.** The top edge is the only one that
 carries two things, and it has three states: full bar, a `BORDER`-thick frame band when
@@ -719,6 +728,7 @@ this table is the same list.
 | `color_title` | colour | `#b0b0b0` |
 | `color_title_shadow` | colour | `#000000` |
 | `title_font_size` | int | `12` |
+| `title_font` | string | `Chicago` |
 | `color_face_active` | colour | `#eda870` |
 | `color_light_active` | colour | `#f7d9c0` |
 | `color_dark_active` | colour | `#7d593b` |

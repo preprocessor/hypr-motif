@@ -13,6 +13,11 @@ namespace CDE {
         bool       showButtons    = true;
         int        titleFontSize  = CDE::TITLE_FONT_SIZE;
 
+        // Font family for the title, resolved by fontconfig through cairo's toy API. The
+        // default is the measured reference face; if it is not installed cairo silently
+        // substitutes another one rather than failing.
+        std::string titleFont     = CDE::TITLE_FONT;
+
         // Inactive (unfocused) window.
         CHyprColor face           = {0.600, 0.600, 0.600, 1};
         CHyprColor light          = {0.820, 0.820, 0.820, 1};
@@ -52,6 +57,11 @@ namespace CDE {
     // rule takes effect at plugin load and at every `hyprctl reload`, the same as
     // bar_height. See AGENTS.md `## Window rules`.
     bool edgeHidden(PHLWINDOW window, uint32_t edge);
+
+    // Whether `cde:no_title` hides the title text on this window. The bar, its fields and
+    // the drag rules stay; the free space is used by grabber bars that run the full title
+    // field. Painting is the only thing this changes — no geometry moves.
+    bool titleHidden(PHLWINDOW window);
 
     // Reads current values; safe to call per raster, it never caches.
     SConfig config();

@@ -58,6 +58,7 @@ plugin {
         # Shared
         color_title_shadow = #000000
         title_font_size = 12
+        title_font = Chicago
         show_buttons = true
     }
 }
@@ -76,16 +77,18 @@ plugin {
 | `color_title_active` | color | title text, focused window | `#ffffff` |
 | `color_title_shadow` | color | the title's hard 1px drop shadow | `#000000` |
 | `title_font_size` | int | title size in points, min 6 | `12` |
+| `title_font` | string | title font family (any fontconfig name) | `Chicago` |
 | `show_buttons` | bool | draw the three title bar buttons | `true` |
 
 ## Window rules
 
 Two rules switch parts of the chrome off, per window. A hidden part reserves no space, so
-the window closes up over it.
+the window closes up over it. A third keeps the bar but drops its text.
 
 | rule | effect |
 | --- | --- |
-| `cde:no_titlebar` | no title bar — no bar, buttons, title or drag area |
+| `cde:no_titlebar` | no title bar — no bar, buttons, title or drag area; the 5px frame stays |
+| `cde:no_title` | no title text — the bar, buttons and fields stay, and the grabber bars span the whole title field |
 | `cde:no_border` | no frame — nothing on the left, right or bottom edge |
 
 ```ini

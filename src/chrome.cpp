@@ -445,13 +445,13 @@ namespace CDE {
     //
     // Returns the ink box so the caller can lay the drag rules out around the text rather
     // than re-deriving the metrics (which would have to be redone after any change here).
-    CBox drawTitle(cairo_t* cr, Vector2D size, const std::string& title, int fontSize, const SPalette& p) {
-        if (title.empty() || fontSize <= 0)
+    CBox drawTitle(cairo_t* cr, Vector2D size, const std::string& title, int fontSize, const std::string& fontFamily, const SPalette& p) {
+        if (title.empty() || fontSize <= 0 || fontFamily.empty())
             return {};
 
         const CBox field = titleFieldRect(size);
 
-        cairo_select_font_face(cr, TITLE_FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_select_font_face(cr, fontFamily.c_str(), CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, fontSize);
         cairo_set_font_options(cr, aliasedFontOptions());
 
@@ -500,9 +500,6 @@ namespace CDE {
     // at both ends, so the 10px gap is what fixes their length: a long title pulls them in
     // rather than letting them run under the text.
     void drawDragRules(cairo_t* cr, Vector2D size, const CBox& titleBox, const SPalette& p) {
-        if (titleBox.w <= 0)
-            return;
-
         const double fieldTop = FIELD_TOP;
         const double fieldH   = size.y - fieldTop - SIDE;
         const double painted  = DRAG_RULE_LINES * SIDES_PAIRED; // a light row plus its shadow
@@ -523,8 +520,6 @@ namespace CDE {
 
         const double fieldStart = leftFieldEnd(size) + DRAG_RULE_GAP;
         const double fieldEnd   = rightFieldStart(size) - DRAG_RULE_GAP;
-        const double textStart  = titleBox.x - DRAG_RULE_GAP;
-        const double textEnd    = titleBox.x + titleBox.w + DRAG_RULE_GAP;
 
         // A rule narrower than the minimum is a stub that reads as a rendering fault, so
         // it is dropped and the title keeps the space to itself.
@@ -539,6 +534,16 @@ namespace CDE {
             }
         };
 
+        // No text to flank — an empty title, or `cde:no_title` — so one rule marks the whole
+        // title field, which is now entirely drag area.
+        if (titleBox.w <= 0) {
+            rule(fieldStart, fieldEnd - fieldStart);
+            return;
+        }
+
+        const double textStart = titleBox.x - DRAG_RULE_GAP;
+        const double textEnd   = titleBox.x + titleBox.w + DRAG_RULE_GAP;
+
         rule(fieldStart, textStart - fieldStart);
         rule(textEnd, fieldEnd - textEnd);
     }
@@ -551,7 +556,7 @@ namespace CDE {
             drawFieldSeparators(cr, size, p);
             drawCornerGrabRules(cr, size, p, cfg.barHeight);
             drawButtons(cr, size, hovered, pressed, p, cfg.showButtons);
-            drawDragRules(cr, size, drawTitle(cr, size, title, cfg.titleFontSize, p), p);
+            drawDragRules(cr, size, drawTitle(cr, size, title, cfg.titleFontSize, cfg.titleFont, p), p);
         });
     }
 

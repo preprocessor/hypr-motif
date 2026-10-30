@@ -219,6 +219,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         CCdeDecoration::forEach([](CCdeDecoration& decoration, PHLWINDOW window) {
             decoration.invalidate();
             g_pDecorationPositioner->onWindowUpdate(window);
+            // A reload that changes only pixels (a theme colour, `cde:no_title`) produces
+            // no geometry change, so the positioner's fast path does nothing and nothing
+            // would repaint the dropped texture. Damage is what makes the new raster land.
+            decoration.damageBar();
         });
     });
 
