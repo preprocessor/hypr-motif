@@ -622,6 +622,11 @@ two. A value it rejects leaves the config colour in place: `parseColour` returns
 `std::nullopt` and `applyColour` does not touch the field. It cannot throw or notify — this
 runs inside a raster.
 
+`rgba(rrggbbaa)` is accepted but the chrome is opaque: `parseColour` keeps the value and
+the Cairo painters use `cairo_set_source_rgb`, so the alpha byte is dropped — the same thing
+that happens to a config colour with alpha. Not a bug to "fix" without making the bar
+translucent on purpose.
+
 **Bool values**: `parseBool` lowercases and reads `0`, `false`, `no`, `off` as false,
 everything else true. A valueless token arrives from the compositor as `"1"`, so
 `["cde:show_titlebar"] = false` and `= 0` both hide the bar, and `= true` brings it back.

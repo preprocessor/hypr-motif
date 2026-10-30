@@ -324,7 +324,7 @@ bool CCdeDecoration::syncHover(const Vector2D& globalPos) {
 
     int under = CDE::BTN_NONE;
     if (m_cachedBar.w > 0 && m_cachedBar.h > 0 && m_cachedBar.containsPoint(globalPos))
-        under = CDE::buttonAt(m_cachedBar.size(), globalPos - m_cachedBar.pos(), CDE::configFor(m_window.lock()).showButtons);
+        under = CDE::buttonAt(m_cachedBar.size(), globalPos - m_cachedBar.pos(), CDE::buttonsShown());
 
     if (under == m_hovered)
         return false;
@@ -486,7 +486,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
         return false;
 
     const Vector2D size    = outerBox().size(); // match the widened bar the glyphs were drawn into
-    const bool     buttons = CDE::configFor(m_window.lock()).showButtons;
+    const bool     buttons = CDE::buttonsShown();
 
     // `pos` is GLOBAL, not bar-relative: checkInputOnDecos forwards the very coords it
     // tested with containsPoint(), and the built-in group bar converts them the same way.
