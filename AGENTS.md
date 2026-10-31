@@ -58,10 +58,11 @@ while "just renaming a constant". See `## Verification`.
 
 ```sh
 nix develop                                          # gcc 14.4, cmake 4.4.3
-# The devshell's hyprland tracks HEAD (0.57 today) while the compositor runs 0.56.2, so
-# point pkg-config at the nixpkgs 0.56.2 headers or load refuses the ABI:
-nix develop -c env PKG_CONFIG_PATH=<hyprland-0.56.2-dev>/share/pkgconfig:$PKG_CONFIG_PATH \
-  sh -c 'cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build'
+# The devshell's hyprland tracks HEAD (27bdfef today) while the compositor runs the 0.57.0
+# TAG (0aa6745). The API hash differs between those two commits, so point the devshell at
+# the tag or load refuses the ABI:
+nix develop --override-input hyprland github:hyprwm/Hyprland/v0.57.0 \
+  -c sh -c 'cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build'
 cp build/libcde.so /tmp/opencode/libcde-next.so      # fresh path — see gotcha 3
 hyprctl plugin unload <the path that is loaded>
 hyprctl plugin load /tmp/opencode/libcde-next.so
@@ -70,11 +71,14 @@ hyprctl getoption plugin:cde:color_face               # must answer, or the copy
 nix build .#default                                 # packaging, needs a tracked tree
 ```
 
-`inputs.hyprland` comes from Hyprland's own flake, so it tracks **HEAD**, not the
-compositor this session runs. `packages.cde.override { hyprland = …; }` builds against a
-different compositor — use the nixpkgs 0.56.2 one unless you are also running HEAD. There
-is no `checks` output; the ABI match is enforced at load time by the API-hash check in
-`main.cpp`, so a mismatched plugin is refused with a notification instead of crashing.
+`inputs.hyprland` comes from Hyprland's own flake, so it tracks **HEAD** (27bdfef
+today), not the 0.57.0 tag the compositor runs. The flake input and the `v0.57.0` tag have
+different API hashes even though both report 0.57.0, so a build against the devshell's
+default headers is rejected at load. `--override-input hyprland github:hyprwm/Hyprland/v0.57.0`
+(or the user's own compositor commit) is what makes the ABI match. There is no `checks`
+output; the ABI match is enforced at load time by the API-hash check in `main.cpp`, so a
+mismatched plugin is refused with a notification instead of crashing. `hyprpm.toml`'s
+`commit_pins` map a Hyprland commit to the plugin commit that builds against it.
 
 Build to a **new filename** every time — never over the one you are loading. The
 compositor keeps the old inode mapped and silently runs stale code.
@@ -464,7 +468,7 @@ bar row   0  1 | 2  3 | 4 | 5 | 6 ......................... 20 | 21
 
 The middle button is `BTN_FLOAT`, **not** `BTN_MIN`: it carries a float glyph and toggles
 floating. Renamed from `BTN_MIN` once the action existed, because the old name described a
-minimise button that 0.56.2 does not have.
+minimise button that 0.57.0 does not have.
 
 Centring on the bar instead of the field puts every glyph ~2px high, very visible against
 the reference. **Floor both axes of the glyph origin** — the field centre is half a pixel
@@ -930,7 +934,7 @@ rather than a damage bug.
 
 ## Button input
 
-Four things about `onInputOnDeco`, all read out of the 0.56.2 source rather than guessed.
+Four things about `onInputOnDeco`, all read out of the 0.57.0 source rather than guessed.
 Every one of them was a bug before it was a fact.
 
 **`pos` is GLOBAL, not decoration-local.** `CWindow::checkInputOnDecos` forwards the very
@@ -941,7 +945,7 @@ while this file claimed the code was "assuming decoration-local". Convert with
 `barBoxGlobal()` (the same box `draw()` uses, workspace render offset included).
 
 **`INPUT_TYPE_MOTION` is never sent.** The enum value exists in `SharedDefs.hpp` and
-0.56.2 has **no call site for it** — the header is not documentation. Hover therefore
+0.57.0 has **no call site for it** — the header is not documentation. Hover therefore
 cannot arrive as an event: `ensureTextures` polls `g_pInputManager->getMouseCoordsInternal()`
 every frame instead, and that poll is also what stops a press whose release never arrived
 from leaving the glyph stuck in its inverted palette.
@@ -960,7 +964,7 @@ syntax error for every classic dispatcher name — measured: `hyprctl dispatch e
 silently doing nothing here. `Config::Actions::closeWindow(self)` and friends are called
 in-process, take the window explicitly (so a click on an unfocused window's bar acts on
 *that* window), and work under both config backends. Note there is **no `minimize`
-dispatcher or action at all** in 0.56.2 — hence the middle button being float, not minimize.
+dispatcher or action at all** in 0.57.0 — hence the middle button being float, not minimize.
 
 **Hit-test the FIELD, not the glyph.** `CDE::buttonAt` and the rects beside it in
 `chrome.cpp` own the geometry and the test together, so they cannot drift; the glyph (9x4
@@ -1000,13 +1004,12 @@ Verify against the headers before trusting these; the plugin API moves between r
   virtuals on the base class — override only what you need.
 
 **Reference implementation:** hyprbars at `/home/wyspr/Repos/hyprland-plugins/hyprbars`.
-Copy its **structure, not its signatures** — it tracks Hyprland master, and its `draw()`
-takes `CRenderContext&` and `SWindowRenderPresentation&`, neither of which exists in our
-pinned 0.56.2 where the signature is `draw(PHLMONITOR, float const&)`. Its commits are
-literally "chase hyprland"; expect more drift.
+Copy its **structure, not its signatures** — it tracks Hyprland master, and while its
+`draw()` now matches our 0.57.0 signature, the rest of it moves with every upstream bump.
+Its commits are literally "chase hyprland"; expect more drift.
 
 **API drift to watch:** `Config::ParserUtils::parseColor` returns
-`std::expected<int64_t, std::string>` in 0.56.2, not `std::optional` — hyprbars'
+`std::expected<int64_t, std::string>` in 0.57.0, not `std::optional` — hyprbars'
 `.value_or(0)` will not compile, check `has_value()`.
 
 ## Known unknown

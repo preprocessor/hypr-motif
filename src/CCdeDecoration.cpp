@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
@@ -51,7 +50,7 @@ bool CCdeDecoration::windowHas(PHLWINDOW window, const std::string& name) {
     // decorations, and catching the ones left by a DIFFERENT still-mapped copy is the
     // whole point — a registry-local check would wave those through and let two copies
     // draw on top of each other. Runs once per window, so the scan costs nothing.
-    for (const auto& d : window->m_windowDecorations)
+    for (const auto& d : window->presentation().decorations())
         if (d && d->getDisplayName() == name)
             return true;
     return false;
@@ -131,7 +130,7 @@ CBox CCdeDecoration::windowBox() const {
     const CBox own = ownBox(this);
     CBox        top, left, right, bottom;
 
-    for (const auto& d : m_window->m_windowDecorations) {
+    for (const auto& d : m_window->presentation().decorations()) {
         if (!d)
             continue;
 
@@ -259,7 +258,7 @@ std::string CCdeDecoration::getDisplayName() {
 
 CBox CCdeDecoration::barBoxGlobal() const {
     CBox box = outerBox();
-    if (m_window->m_workspace && !m_window->m_pinned)
+    if (m_window->m_workspace && !(m_window->m_state & Desktop::View::WINDOW_STATE_PINNED))
         box.translate(m_window->m_workspace->m_renderOffset->value());
     return box;
 }
@@ -293,7 +292,7 @@ void CCdeDecoration::retexture(float scale) {
 
     // `show_title = false` hides the text but keeps the bar and its fields; an empty title
     // the drag rules span the whole title field, which is then all drag area.
-    const std::string title = CDE::titleHidden(m_window.lock()) ? std::string{} : m_window->m_title;
+    const std::string title = CDE::titleHidden(m_window.lock()) ? std::string{} : m_window->metadata().title();
 
     // A top edge with no bar is the frame's top band, not a title bar: same painter as the
     // other three sides. `barVisible` also tells the side strips whether their top grab
@@ -303,7 +302,7 @@ void CCdeDecoration::retexture(float scale) {
     else
         m_barTex = CDE::renderBorder(m_edge, box.size(), scale, cfg, act, barVisible);
 
-    m_lastTitle   = m_window->m_title;
+    m_lastTitle   = m_window->metadata().title();
     m_lastScale   = scale;
     m_lastSize    = box.size();
     m_lastFocused = act ? 1 : 0;
@@ -416,7 +415,7 @@ bool CCdeDecoration::textureIsCurrent(float scale) const {
         return false;
 
     const bool sameScale   = m_lastScale == scale;
-    const bool sameTitle   = m_lastTitle == m_window->m_title;
+    const bool sameTitle   = m_lastTitle == m_window->metadata().title();
     const bool sameConfig  = m_generation == CDE::generation();
     const bool sameSize    = m_lastSize == outerBox().size();
     const bool sameFocused = m_lastFocused == (isActive() ? 1 : 0);
@@ -562,7 +561,7 @@ bool CCdeDecoration::onInputOnDeco(const eInputType type, const Vector2D& pos, s
     }
 }
 
-void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
+void CCdeDecoration::draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& alpha, const Render::SWindowRenderPresentation& presentation) {
     if (!windowVisible())
         return;
 
@@ -608,5 +607,5 @@ void CCdeDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     data.clipBox    = global;
     data.clipRegion = CRegion(global);
 
-    g_pHyprRenderer->currentPass().add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(data)));
+    g_pHyprRenderer->currentPass(ctx).add(Hyprutils::Memory::makeUnique<CTexPassElement>(std::move(data)));
 }

@@ -2,9 +2,13 @@
 name = "hypr-CDE-borders"
 authors = ["wyspr"]
 
-# `commit_pins = [["<hyprland commit>", "<plugin commit>"], ...]` can be added here when
-# cutting a release; without pins hyprpm builds the current HEAD, which is what you want
-# while the plugin is still moving.
+# Each pair is [Hyprland commit, plugin commit]. hyprpm matches the running Hyprland's
+# exact commit and resets the plugin to the paired commit, so a pin is how an older
+# compositor keeps building after the source moves on.
+commit_pins = [
+    # v0.56.2: the last plugin commit that still built against it.
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "ebb4160664c442df2cbee7949558c76d879e6544"],
+]
 
 [cde]
 description = "Common Desktop Environment (Motif) window chrome for Hyprland"

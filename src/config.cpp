@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <hyprland/src/config/shared/parserUtils/ParserUtils.hpp>
+#include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>

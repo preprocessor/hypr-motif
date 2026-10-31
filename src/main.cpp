@@ -10,7 +10,7 @@
 
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -44,7 +44,7 @@ static void onNewWindow(PHLWINDOW window) {
         if (CCdeDecoration::windowHas(window, e.name))
             continue;
 
-        HyprlandAPI::addWindowDecoration(PHANDLE, window, Hyprutils::Memory::makeUnique<CCdeDecoration>(window, e.edge, e.name));
+        HyprlandAPI::addWindowDecoration(PHANDLE, window, Hyprutils::Memory::makeShared<CCdeDecoration>(window, e.edge, e.name));
     }
 }
 
@@ -61,7 +61,7 @@ static std::vector<Hyprutils::Signal::CHyprSignalListener> g_listeners;
 
 // Same hazard, one instance: the registered hyprctl command holds a std::function pointing
 // into this shared object, and Hyprland keeps calling it for as long as it is registered.
-static SP<SHyprCtlCommand> g_hyprCtlCommand;
+static SP<IPC::Socket1::SCommand> g_hyprCtlCommand;
 
 // The window's outer rect: the client box grown by the chrome actually reserved on it.
 //
@@ -138,15 +138,15 @@ static void patchRect(std::string& json, size_t from, size_t to, const CBox& box
 // IHyprWindowDecoration has no reported-extents hook, so a plugin cannot widen what
 // `hyprctl clients` prints; this command is the only way to publish the outer rect.
 //
-// The format argument is ignored and the output is always JSON — patching the text form
+// The request's format is ignored and the output is always JSON — patching the text form
 // would be string surgery with no field names to anchor on.
-static std::string cdeClients(eHyprCtlOutputFormat, std::string) {
+static IPC::Socket1::SResponse cdeClients(const IPC::Socket1::SRequest&) {
     std::string json = HyprlandAPI::invokeHyprctlCommand("clients", "", "json");
 
     // Loud, not silent: if the format argument is not what this Hyprland wants, returning
     // the untouched client rects would look like a working answer that is quietly wrong.
     if (json.find(R"("address")") == std::string::npos)
-        return R"(hyprctl cde clients: the compositor returned no JSON for `clients`.)";
+        return IPC::Socket1::SResponse(R"(hyprctl cde clients: the compositor returned no JSON for `clients`.)");
 
     std::unordered_map<std::string, CBox> rects;
     for (auto& window : Desktop::windowState()->windows()) {
@@ -173,7 +173,7 @@ static std::string cdeClients(eHyprCtlOutputFormat, std::string) {
             patchRect(json, objectStart, objectEnd, rect->second);
     }
 
-    return json;
+    return IPC::Socket1::SResponse(json);
 }
 
 // Not named `listen`: that is POSIX ::listen, and this would be an overload of it the
@@ -202,7 +202,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Prefix-matched, so `hyprctl cde clients` arrives here with its subcommand as the
     // argument. `exact` = true would demand the whole request equal the name.
-    g_hyprCtlCommand = HyprlandAPI::registerHyprCtlCommand(PHANDLE, {.name = "cde", .exact = false, .fn = cdeClients});
+    g_hyprCtlCommand = HyprlandAPI::registerHyprCtlCommand(PHANDLE, {.name = "cde", .match = IPC::Socket1::COMMAND_MATCH_PREFIX, .handler = cdeClients});
 
     keepListener(Event::bus()->m_events.window.open, [](PHLWINDOW w) { onNewWindow(w); });
 

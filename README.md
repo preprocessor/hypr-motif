@@ -17,7 +17,7 @@ Cairo at runtime — there are no image assets.
 
 ## Requirements
 
-Built and verified against **hyprland 0.56.2**. There is no ABI stability across `dlopen`:
+Built and verified against **hyprland 0.57.0**. There is no ABI stability across `dlopen`:
 build against the same hyprland you run, or the plugin is rejected or takes the compositor
 down.
 

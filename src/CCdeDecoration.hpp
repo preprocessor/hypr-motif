@@ -8,8 +8,9 @@
 
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/helpers/Color.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/helpers/math/Math.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
@@ -50,7 +51,7 @@ class CCdeDecoration : public IHyprWindowDecoration {
 
     SDecorationPositioningInfo getPositioningInfo() override;
     void                       onPositioningReply(const SDecorationPositioningReply& reply) override;
-    void                       draw(PHLMONITOR monitor, float const& alpha) override;
+    void                       draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& alpha, const Render::SWindowRenderPresentation& presentation) override;
     eDecorationType            getDecorationType() override;
     void                       updateWindow(PHLWINDOW w) override;
     void                       damageEntire() override;
@@ -154,7 +155,7 @@ class CCdeDecoration : public IHyprWindowDecoration {
 
     // Cached raster is only valid while the window is still mapped and placed.
     bool windowVisible() const {
-        return m_window && m_window->m_isMapped && m_assigned.w && m_assigned.h;
+        return m_window && m_window->mapped() && m_assigned.w && m_assigned.h;
     }
 
     // Whether the cached texture still matches its cache key.
