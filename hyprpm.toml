@@ -6,8 +6,9 @@ authors = ["wyspr"]
 # exact commit and resets the plugin to the paired commit, so a pin is how an older
 # compositor keeps building after the source moves on.
 commit_pins = [
-    # v0.56.2: the last plugin commit that still built against it.
-    ["efb50993780079460b0cbed1363e2166a2de1d9f", "ebb4160664c442df2cbee7949558c76d879e6544"],
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "ebb4160664c442df2cbee7949558c76d879e6544"], # v0.56.2
+    ["0aa6745f705f2c4b0a5004eb019ef76e5bbdb426", "2a416de1f95a03cdd402ac16f91d155137f13c75"], # v0.57.0
+    ["27bdfef92d25c73b51a1cc0c3defded09e0a0344", "2a416de1f95a03cdd402ac16f91d155137f13c75"],
 ]
 
 [cde]
