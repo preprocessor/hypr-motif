@@ -15,17 +15,11 @@ Cairo at runtime — there are no image assets.
 - Per-window rules to hide the bar, the title text or the frame (below).
 - `hyprctl cde clients` reports the outer window rect, chrome included.
 
-## Requirements
-
-Built and verified against **hyprland 0.57.0**. There is no ABI stability across `dlopen`:
-build against the same hyprland you run, or the plugin is rejected or takes the compositor
-down.
-
 ## Install
 
 ```sh
 # hyprpm
-hyprpm add https://github.com/wyspr/hypr-CDE-borders
+hyprpm add https://github.com/preprocessor/hypr-motif
 hyprpm enable cde
 ```
 
