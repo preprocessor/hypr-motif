@@ -28,12 +28,12 @@
       };
 
       packages.${system} = {
-        default = inputs.self.packages.${system}.cde;
+        default = inputs.self.packages.${system}.hypr-motif;
 
-        cde = lib.makeOverridable (
+        hypr-motif = lib.makeOverridable (
           { hyprland }:
           pkgs.hyprlandPlugins.mkHyprlandPlugin {
-            pluginName = "cde";
+            pluginName = "hypr-motif";
             version = "0.1";
 
             inherit hyprland;
