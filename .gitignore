@@ -43,3 +43,6 @@ build/
 
 .direnv/
 .envrc
+
+.agents/
+docs/superpowers/
