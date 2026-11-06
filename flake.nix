@@ -15,8 +15,6 @@
     in
     {
       devShells.${system}.default = pkgs.mkShell.override { stdenv = pkgs.gcc14Stdenv; } {
-        name = "hypr-CDE-borders";
-
         inputsFrom = [ hyprland ];
 
         packages = [
@@ -33,7 +31,7 @@
         hypr-motif = lib.makeOverridable (
           { hyprland }:
           pkgs.hyprlandPlugins.mkHyprlandPlugin {
-            pluginName = "hypr-motif";
+            pluginName = "cde";
             version = "0.1";
 
             inherit hyprland;
